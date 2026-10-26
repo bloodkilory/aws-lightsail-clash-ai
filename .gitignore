@@ -1,0 +1,11 @@
+__pycache__/
+*.pyc
+.DS_Store
+params.json
+identity.json
+bundle/
+state.json
+traffic-credentials.json
+subscription-url.txt
+*.pem
+*.key
