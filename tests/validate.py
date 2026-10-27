@@ -56,7 +56,6 @@ class GuideTests(unittest.TestCase):
         body = RENDERED['clash.yaml']
         self.assertLess(body.index('- DOMAIN,services.googleapis.cn'), body.index('- GEOSITE,cn,DIRECT'))
         self.assertLess(body.index('- GEOSITE,geolocation-!cn'), body.index('- GEOSITE,cn,DIRECT'))
-        self.assertLess(body.index('geosite:geolocation-!cn:'), body.index('geosite:cn:'))
         self.assertIn('IP-CIDR,8.8.8.8/32,DIRECT,no-resolve', body)
 
     @unittest.skipUnless(os.environ.get('MIHOMO_BIN'), 'MIHOMO_BIN not set')
@@ -85,6 +84,10 @@ def load_tests(loader, tests, pattern):
     tests.addTests(loader.loadTestsFromTestCase(module.MeterTests))
     # Keep the temporary module alive until the complete test process exits.
     module.MeterTests.template_dir = temp
+    import test_dns
+    test_dns.RENDERED = RENDERED
+    test_dns.TEXT = TEXT
+    tests.addTests(loader.loadTestsFromTestCase(test_dns.DnsTests))
     if os.environ.get('CADDY_BIN'):
         import test_http
         test_http.RENDERED = RENDERED

@@ -1,10 +1,10 @@
 # AWS Lightsail + Clash：AI 执行手册
 
-从选服务器、核实赠金，到部署 VLESS/REALITY、国内外分流、Google Play 下载、HTTPS 订阅和月流量显示。默认使用 **Lightsail 新加坡、Ubuntu 24.04 LTS、Xray + Mihomo、Caddy**。
+从选服务器、核实赠金，到部署 VLESS/REALITY、国内外分流、Google Play 下载、HTTPS 订阅、月流量显示、Claude 固定出口及 DNS 加固。默认使用 **Lightsail 新加坡、Ubuntu 24.04 LTS、Xray + Mihomo、Caddy**。
 
 本文件包含完整配置和脚本，单独下载 README 即可交给有浏览器、终端和文件操作能力的 AI 执行。账号登录、付款信息、验证码和授权由账号所有者完成；其余步骤连续执行。**“一键”指一次下达任务后由 AI 推进，不代表跳过云资源费用和权限确认。**
 
-整理日期：2026-10-26。基础链路来自实际部署；以下模板已脱敏。价格、赠金活动、客户端版本应在执行当天复核。新账号、新服务器仍须完成本文验收，不能把既有案例当成本次成功证据。
+更新日期：2026-10-27。基础链路来自实际部署；以下模板已脱敏。价格、赠金活动、客户端版本应在执行当天复核。新账号、新服务器仍须完成本文验收，不能把既有案例当成本次成功证据。
 
 ## 1. 复制这段话给 AI
 
@@ -13,7 +13,8 @@
 
 目标：部署个人使用的 AWS Lightsail 新加坡节点，让 Mac 和 Android
 通过同一条 HTTPS 订阅使用；国内和局域网直连、国外走节点；
-Google Play 可下载；Clash 显示本月服务器 NetworkIn + NetworkOut / 套餐额度。
+Google Play 可下载；Clash 显示本月服务器 NetworkIn + NetworkOut / 套餐额度；
+Claude 官方请求与 DNS 固定经 AWS；Mac 阻止物理网卡直接发出 53/853 流量。
 
 默认：Ubuntu 24.04 LTS x86_64、含公网 IPv4 的 1GB Lightsail 套餐，
 基准价 7 美元/月、2TB/月；先确认执行当天价格与账号赠金覆盖范围。
@@ -22,7 +23,8 @@ Google Play 可下载；Clash 显示本月服务器 NetworkIn + NetworkOut / 套
 
 请先只读检查并列出简短执行链路。常规细节直接按本文选择，不反复问选型。
 创建付费资源、升级账号限制、开放公网端口、接受证书协议、
-新建长期 IAM 凭据前，准备好具体配置与费用，再按工具要求请求确认。
+新建长期 IAM 凭据或安装 Mac PF 防护前，准备好具体变更与回退方法，
+再按工具要求请求确认。
 密码、验证码、付款资料和 MFA 操作交给我本人完成。
 
 执行各阶段后记录实际证据，失败先定位并尝试合理替代路径。
@@ -53,9 +55,10 @@ AI 先读取现有环境，再填写下表；只有账号归属、费用上限�
 
 1. 实例、静态 IPv4、套餐费用、赠金适用范围均有实际页面或 API 证据。
 2. Xray、订阅服务和流量定时器启用；Google、YouTube、UDP 测试通过。
-3. 国内请求匹配 `DIRECT`；国外请求和 Google Play 入口匹配代理，DNS 同步分流。
+3. 国内业务请求匹配 `DIRECT`；国外请求和 Google Play 入口匹配代理；Claude 官方请求及 DNS 固定 AWS。
 4. HTTPS 订阅通过正常证书校验，错误路径返回 404，下载内容与服务器源文件一致。
 5. Mac 用远程订阅显示月流量；手机端逐项标注“已实测”或“待用户验证”。
+6. Mac TUN 的 UDP/TCP DNS 均可用，物理网卡 53/853 出站被拦截；切订阅和重启后复验。
 
 ## 3. 选服务器、获取并核实赠金
 
@@ -220,25 +223,30 @@ curl --max-time 20 -x http://127.0.0.1:7897 -o /dev/null -w '%{http_code}\n' htt
 curl --max-time 20 -x http://127.0.0.1:7897 -o /dev/null -w '%{http_code}\n' https://www.youtube.com/
 ```
 
-应分别得到服务器静态 IP、204、正常 YouTube 响应。另用支持 SOCKS5 UDP ASSOCIATE 的测试工具发送 DNS 请求，经 XUDP 查询 `8.8.8.8:53` 并收到响应；普通 `curl` 无法证明 UDP 通。
+应分别得到服务器静态 IP、204、正常 YouTube 响应。另用支持 SOCKS5 UDP ASSOCIATE 的工具验证 XUDP：仅在隔离测试内核中临时使用 `rules: ["MATCH,AWS 新加坡"]`，查询 `8.8.8.8:53` 并收到响应，测试后销毁该临时配置。正式配置会拒绝未被 TUN 接管的 53 流量，不能用它执行这项绕过 DNS 模块的测试；普通 `curl` 无法证明 UDP 通。
 
-### 6.3 分流规则与 DNS 必须一起配置
+### 6.3 业务分流与 DNS 固定出口
 
-附录中的 `clash.yaml` 是完整基线，关键顺序如下：
+附录 `clash.yaml` 是唯一配置基线。业务规则按以下顺序执行：
 
 ```text
 服务器 IP → DIRECT（防止连接节点自身形成循环）
+Claude / Anthropic 官方域名及指定日志端点 → AWS 新加坡
+已知 DoH / HTTPDNS、853 端口 → AWS 新加坡；未被 TUN 接管的 53 → REJECT
 局域网域名 / 私有 IP → DIRECT
-services.googleapis.cn → 代理
-geolocation-!cn → 代理
-cn 域名 → DIRECT
-CN IP → DIRECT
-其余 → 代理
+services.googleapis.cn → 节点选择
+geolocation-!cn → 节点选择
+cn 域名 / CN IP → DIRECT
+其余 → 节点选择
 ```
 
-`geolocation-!cn` 必须在 `cn` 前面；DNS `nameserver-policy` 也按这个顺序书写。两类域名集合可能重叠，把 `cn` 放前面曾导致部分海外服务直连。国外 DoH 明确经 `#节点选择`，国内 DoH 经 `#DIRECT`；保留正常证书校验。[Mihomo DNS](https://wiki.metacubex.one/en/config/dns/)、[规则说明](https://wiki.metacubex.one/en/config/rules/)
+`geolocation-!cn` 仍在 `cn` 前，避免集合重叠导致海外业务直连。Claude 使用显式规则固定到 `AWS 新加坡`，不随通用选择器切到 `DIRECT`；本配置覆盖官方域名及本案例观察到的两个日志端点，不改变 Claude Code/CLI 的第三方 API 设置，也不代表登录或订阅权限已通过。
 
-通过客户端连接日志核对真实命中的规则与出口，至少覆盖 Google、GitHub、一个实际使用的国内站点及局域网地址。不要只检查 YAML 文本。Geo 数据开启 24 小时更新；首次加载须确认下载成功。
+DNS 采用同一组带 `#AWS 新加坡` 的 Cloudflare / Google DoH，统一用于 `nameserver`、`default-nameserver`、`proxy-server-nameserver`、`direct-nameserver`；Google 请求显式设置空 ECS。节点与 DoH 均使用 IP，启动不依赖直连 DNS。删除旧版国内直连 DNS policy，不再保留重复的按域名 DNS 列表。[Mihomo DNS 配置](https://wiki.metacubex.one/en/config/dns/)
+
+**国内业务仍直连，但解析依赖 AWS。** AWS 不可用时，未缓存的国内、国外域名都会解析失败，不回退系统或明文 DNS；缓存、已有连接不一定立即失效。不能把这一行为写成“代理停了国内上网也不受影响”。若内网名称只由路由器或企业 DNS 提供，本基线不会自动查询它，先确认所需内网名称再设置精确例外。
+
+通过真实连接日志核对 Google、GitHub、Claude、国内站点和局域网地址的出口；系统 DNS 显示一个公共地址不等于请求已从物理网卡泄漏，需结合 TUN 接管和抓包判断。Geo 数据每 24 小时更新，首次加载须成功。
 
 ### 6.4 Google Play 无法下载
 
@@ -247,6 +255,72 @@ CN IP → DIRECT
 已采用的最小修复：把 `DOMAIN,services.googleapis.cn,节点选择` 放到 `GEOSITE,cn,DIRECT` 前面；模板已包含。随后更新**服务器订阅源文件**，手机更新订阅、断开重连，在规则模式真实下载一个应用验证。
 
 不把全部 `google.cn` 一刀切代理，不先清除 Play 服务数据。若全局模式也失败，先处理节点连接、客户端协议兼容和账号/设备问题，这条规则不能替代根因检查。
+
+### 6.5 macOS DNS 防护与回退
+
+分两层实施：订阅中的 `tun.dns-hijack` 同时接管 UDP 和 TCP 53；Mac 本机 PF 只阻止物理 `en*` / `bridge*` 接口上的 TCP/UDP 53、853。**禁止使用 `on ! lo0`**：它也会挡住 `utun*`，曾造成 TUN 内 DNS 失败和普通 HTTPS 连接超时。不要改动全局 PF 主规则、清空其他 anchor 或刷新全部连接状态。
+
+这项 PF 防护是 Mac 本机设置，不能随订阅下发给手机。它不识别所有应用自带的 HTTPS DNS；已知 DoH/HTTPDNS 用附录规则处理，未知 443 DNS 仍按普通业务规则匹配。Android 的 Private DNS 也可能绕过 TUN DNS 接管，应单独核对实际客户端设置。[Mihomo TUN 说明](https://wiki.metacubex.one/en/config/inbound/tun/)
+
+实施顺序：
+
+1. 先在隔离内核验证订阅，再在真实 TUN 下验证国内外 HTTPS 和 TCP/UDP DNS。仅返回 fake IP 不能证明上游解析成功；另查内核 `/dns/query` 的真实答案或完成带证书校验的 HTTPS。
+2. 读取客户端**最终生效配置**。Clash Verge Rev 的全局 DNS 覆盖、订阅 Merge/Script 可能覆盖源 YAML；只调整冲突项，保留其他订阅。不要为套用模板把 Wi-Fi DNS 永久写死为 `127.0.0.1`；局域网 DNS 不一定被 macOS TUN 自动接管。
+3. 说明防护范围、关闭代理后的解析失败行为和下方回退路径，获得安装授权。把生成的 `bundle/macos-dns-guard.sh`、`bundle/local.clash-dns-guard.plist`、`bundle/macos-dns-rollback.sh` 安全复制到 Mac 私密目录。不要把整个含节点凭据的 bundle 上传公共位置。
+4. 已有同名防护时先备份并增量更新，不执行下面的首次安装段。新增 USB 网卡后重新运行 helper 并复验；开机时 LaunchDaemon 会重新枚举网卡。其他接口命名不在本模板覆盖范围。
+
+首次安装：在 Mac 已授权的 root shell 中，进入上述三个文件所在目录执行。先启动独立的 **120 秒自动回退**，验证完再提交；以下命令不修改系统 DNS。
+
+```bash
+set -eu
+umask 077
+trial=/var/run/local.clash-dns-guard.trial
+for target in /usr/local/libexec/clash-dns-guard \
+  /etc/pf.anchors/local.clash-dns-guard \
+  /Library/LaunchDaemons/local.clash-dns-guard.plist \
+  /var/run/local.clash-dns-guard.token; do
+  test ! -e "$target" || { echo 'Existing guard found; use incremental maintenance.'; exit 1; }
+done
+pfctl -sr | grep -F 'anchor "com.apple/*"' >/dev/null
+# 先检查现有 PF 顺序；前置 quick pass 或其他 VPN 规则需单独验证。
+mkdir -m 700 "$trial"
+install -o root -g wheel -m 700 macos-dns-rollback.sh "$trial/rollback.sh"
+nohup /bin/sh "$trial/rollback.sh" --watch > "$trial/watch.log" 2>&1 < /dev/null &
+install -d -o root -g wheel -m 755 /usr/local/libexec
+install -o root -g wheel -m 755 macos-dns-guard.sh /usr/local/libexec/clash-dns-guard
+install -o root -g wheel -m 644 local.clash-dns-guard.plist /Library/LaunchDaemons/local.clash-dns-guard.plist
+/usr/local/libexec/clash-dns-guard
+pfctl -a com.apple/000.clash-dns-guard -sr
+```
+
+在 120 秒内验证：普通国内/国外 HTTPS 正常；发往当前系统 DNS 的 UDP/TCP 查询都能被 TUN 处理；使用绑定物理接口的 socket 发往 53/853 被阻止。用 `tcpdump -ni <实际物理接口> 'dst port 53 or dst port 853'` 同时抓包，不能把“应用请求失败”单独作为无泄漏证据。默认路由下的 `dig @8.8.8.8` 可能被 TUN 接管，不是物理绕过测试。
+
+全通过后，在同一 root shell 提交；争抢同一 `decision` 目录使超时回退与提交只能成功一个。若 `mkdir` 失败，读取 `result` 和日志，不要强行写成功。超时或任一验收失败，运行回退脚本，只卸载本次首次安装。
+
+```bash
+# 仅在所有实时检查通过且尚未超时后执行。
+set -eu
+trial=/var/run/local.clash-dns-guard.trial
+mkdir "$trial/decision"
+if ! launchctl bootstrap system /Library/LaunchDaemons/local.clash-dns-guard.plist; then
+  /bin/sh "$trial/rollback.sh" --rollback
+  exit 1
+fi
+printf 'COMMITTED\n' > "$trial/result"
+```
+
+```bash
+# 本次首次安装的手动回退；不会关闭全局 PF 或改动其他规则。
+sudo /bin/sh /var/run/local.clash-dns-guard.trial/rollback.sh --rollback
+```
+
+提交后再核对 `launchctl print system/local.clash-dns-guard`、anchor 和 helper 的网卡列表。重启内核、切换订阅、重启 Mac 各自复验；未执行的项目写“未测”。停代理后的失败保护测试优先使用隔离内核，不为文档校验中断正在使用的网络。
+
+### 6.6 与其他订阅共存
+
+AWS 订阅的固定 IP 无需直连 bootstrap。其他订阅若用域名连接节点，不能照搬“节点域名也经该节点解析”，否则会循环依赖。只在该订阅的 Merge 中把 `default-nameserver` 与 `proxy-server-nameserver` 设置为 IP 形式的加密 bootstrap（如 `https://223.5.5.5/dns-query#DIRECT`）；普通 `nameserver`、`direct-nameserver` 仍经该订阅已验证的节点，不能保留会抢先匹配的旧直连 DNS policy。此分支允许节点启动所需的直连加密查询，保护范围与 AWS 基线不同。
+
+不要只凭 HTTP 204 延迟测速选 DNS 出口：本案例曾出现测速正常、真实 TLS 失败的节点。用多个国内外域名完成证书校验和真实解析，再固定可用节点；切换订阅及重启后重新检查。不要把某个机场节点名或一次成功写成全部节点可用。
 
 ## 7. 生成可自动更新的 HTTPS 订阅
 
@@ -340,7 +414,7 @@ systemctl enable --now lightsail-traffic.timer
 systemctl list-timers lightsail-traffic.timer --no-pager
 ```
 
-首个采集必须成功再宣布完成。代码在指标请求失败或数据异常时保留上次快照；首次尚无数据时等待 AWS 指标发布，不能填一个手工估计值冒充实测。
+首个采集必须成功再宣布完成。指标请求失败或数据异常时保留上次快照；每月开始后的前 15 分钟若 AWS 尚无指标，允许暂报新月份 0，其他时段空数据报错并保留旧值。两种情况均需核对状态文件时间，不能填手工估计值冒充实测。
 
 响应头格式：
 
@@ -360,6 +434,7 @@ profile-update-interval: 1
 3. 手动更新一次，卡片应出现“本月已用 / 2.00 TB”。描述可写“每月 1 日 08:00 重置”，不是订阅到期时间。
 4. Android 添加或更新同一 URL，选择 AWS 节点，规则模式断开重连；核对连接、Play 下载和流量卡片。
 5. 采集约每 15 分钟更新，客户端在订阅刷新时读取，**不是实时推送仪表盘**。某客户端不展示该响应头时，分别报告“服务端已返回”与“该客户端未显示”。
+6. 保留三份相互核对的证据：AWS 统计状态、HTTPS `Subscription-Userinfo`、客户端卡片；记录更新时间。规则/DNS 更新只替换订阅 YAML，继续复用第 8 节同一个采集服务和定时器，不重复安装统计功能。
 
 ## 10. 验收记录
 
@@ -371,7 +446,10 @@ AI 按实际结果填写，未知项不能写通过：
 | 网络入口 | 443/8443/80 与授权一致；22 未全网开放 |
 | Xray | 配置测试通过、服务 active/enabled、443 监听 |
 | 客户端 TCP/UDP | 正确出口、Google 204、YouTube 可访问、UDP DNS 收到响应 |
-| 分流和 DNS | 国内 DIRECT、国外代理、国外 DoH 经节点、Play 入口命中指定规则 |
+| 分流和 DNS | 国内业务 DIRECT、Claude 与 DoH 固定 AWS、Play 入口命中指定规则 |
+| DNS 失败保护 | 隔离内核中的 AWS 不可用且选择器为 DIRECT 时，真实 DNS 查询失败且无直连回退 |
+| Mac PF | TUN TCP/UDP DNS 可用；物理接口 53/853 绕过请求被阻止，抓包无出站 |
+| 切换与重启 | 分别记录订阅切换、内核重启、整机重启结果，未执行不得写通过 |
 | 手机 Play | 规则模式实际完成一次应用下载 |
 | 订阅 | 可信 TLS、200、正文一致、错误路径 404 |
 | 续期 | 正式证书、有效期和自动续期计划可查 |
@@ -379,7 +457,7 @@ AI 按实际结果填写，未知项不能写通过：
 | 权限 | 凭据 0600、专用 API 允许、无关 API 被拒绝 |
 | UI | Mac 远程订阅卡片出现用量；手机单独核对 |
 
-本案例已跑通服务器、Mac、手机连接和 Play 下载；手机流量卡片没有在本文整理时取得实机证据。模板的本地检查也不能代替新服务器和设备的整体验收。
+本案例已跑通服务器、Mac、手机连接和 Play 下载；流量响应头和 Mac 远程订阅用量信息已有证据，手机流量卡片仍待实机核对。后续完成了 AWS 固定 DNS、物理网卡防护及 TUN 连通性修复；各订阅切换与内核测试的结果需逐项保留，不能推广成所有节点或整机重启均通过。仓库回归使用脱敏配置，不重新部署服务器或修改本机网络。
 
 ## 11. 维护、续跑与故障定位
 
@@ -401,7 +479,9 @@ AI 按实际结果填写，未知项不能写通过：
 | CloudShell 无法创建环境 | 新账号验证状态 | 使用 Lightsail 浏览器 SSH |
 | `REALITY authentication failed` | 内核版本、UUID、公钥、short ID、SNI、混合密钥交换支持 | 更新兼容客户端；不要先改规则 |
 | 全局正常、规则模式 Play 失败 | `services.googleapis.cn` 的实际命中规则 | 把精确域名规则放到 CN 规则前，并更新服务器订阅 |
-| 海外页面仍出现国内 DNS/出口 | 域名集合重叠、有效配置、其他代理链 | 国外规则和 DNS policy 优先；从真实连接日志复核 |
+| 海外页面仍出现国内 DNS/出口 | 最终生效 DNS、覆盖脚本、真实连接与物理抓包 | 使用固定 AWS DoH；区分系统 DNS 显示值与实际出站 |
+| 加固后国内外 HTTPS 都超时 | PF 是否包含 `! lo0` 或 `utun*`、TUN TCP/UDP DNS | 回退本次 PF，再只对物理接口加载；不要盲目修改业务分流 |
+| 其他订阅无法解析或测速绿但 TLS 失败 | 节点域名 bootstrap、选中节点的真实 TLS | 按 6.6 节在该订阅 Merge 修复并单独验收 |
 | 订阅证书错误 | 正式 CA、IP SAN、default_sni、80 连通性 | 修复签发或续期，不关闭证书校验 |
 | 没有流量卡片 | 本地/远程配置、实际响应头、客户端支持 | 改成远程订阅并刷新 |
 | 流量不更新 | timer、service Result、状态文件时间、SourceIp 条件 | 修复采集；失败保留旧值，不清零 |
@@ -469,7 +549,8 @@ def main():
     templates = extract((base / "README.md").read_text())
     required = {"xray.json", "xray.service", "clash.yaml", "Caddyfile",
                 "clash-subscription.service", "traffic-header.caddy", "meter.py",
-                "lightsail-traffic.service", "lightsail-traffic.timer", "iam-policy.json"}
+                "lightsail-traffic.service", "lightsail-traffic.timer", "iam-policy.json",
+                "macos-dns-guard.sh", "local.clash-dns-guard.plist", "macos-dns-rollback.sh"}
     if not required.issubset(templates):
         raise ValueError(f"Missing templates: {sorted(required - templates.keys())}")
     bundle = base / "bundle"
@@ -620,26 +701,22 @@ dns:
   enable: true
   ipv6: true
   default-nameserver:
-  - https://223.5.5.5/dns-query
-  - https://223.6.6.6/dns-query
+  - https://1.1.1.1/dns-query#AWS 新加坡
+  - https://8.8.8.8/dns-query#AWS 新加坡&ecs=0.0.0.0/0&ecs-override=true
   enhanced-mode: fake-ip
   fake-ip-range: 198.18.0.1/16
   use-hosts: true
   nameserver:
-  - https://1.1.1.1/dns-query#节点选择
-  - https://8.8.8.8/dns-query#节点选择
+  - https://1.1.1.1/dns-query#AWS 新加坡
+  - https://8.8.8.8/dns-query#AWS 新加坡&ecs=0.0.0.0/0&ecs-override=true
   fake-ip-range6: 2001:2::0/64
   use-system-hosts: false
   proxy-server-nameserver:
-  - https://223.5.5.5/dns-query#DIRECT
-  - https://doh.pub/dns-query#DIRECT
-  nameserver-policy:
-    geosite:geolocation-!cn:
-    - https://1.1.1.1/dns-query#节点选择
-    - https://8.8.8.8/dns-query#节点选择
-    geosite:cn:
-    - https://223.5.5.5/dns-query#DIRECT
-    - https://doh.pub/dns-query#DIRECT
+  - https://1.1.1.1/dns-query#AWS 新加坡
+  - https://8.8.8.8/dns-query#AWS 新加坡&ecs=0.0.0.0/0&ecs-override=true
+  direct-nameserver:
+  - https://1.1.1.1/dns-query#AWS 新加坡
+  - https://8.8.8.8/dns-query#AWS 新加坡&ecs=0.0.0.0/0&ecs-override=true
 proxies:
 - name: AWS 新加坡
   type: vless
@@ -665,6 +742,25 @@ proxy-groups:
   - DIRECT
 rules:
 - IP-CIDR,@@SERVER_IPV4@@/32,DIRECT,no-resolve
+- DOMAIN-SUFFIX,anthropic.com,AWS 新加坡
+- DOMAIN-SUFFIX,claude.ai,AWS 新加坡
+- DOMAIN-SUFFIX,claude.com,AWS 新加坡
+- DOMAIN-SUFFIX,claude.app,AWS 新加坡
+- DOMAIN-SUFFIX,claudeusercontent.com,AWS 新加坡
+- DOMAIN-SUFFIX,claudemcpcontent.com,AWS 新加坡
+- DOMAIN,http-intake.logs.us5.datadoghq.com,AWS 新加坡
+- DOMAIN,browser-intake-us5-datadoghq.com,AWS 新加坡
+- GEOSITE,category-doh,AWS 新加坡
+- GEOSITE,category-httpdns-cn,AWS 新加坡
+- DST-PORT,53,REJECT
+- DST-PORT,853,AWS 新加坡
+- IP-CIDR,1.1.1.1/32,AWS 新加坡,no-resolve
+- IP-CIDR,1.0.0.1/32,AWS 新加坡,no-resolve
+- IP-CIDR,8.8.8.8/32,AWS 新加坡,no-resolve
+- IP-CIDR,8.8.4.4/32,AWS 新加坡,no-resolve
+- IP-CIDR,223.5.5.5/32,AWS 新加坡,no-resolve
+- IP-CIDR,223.6.6.6/32,AWS 新加坡,no-resolve
+- IP-CIDR,119.29.29.29/32,AWS 新加坡,no-resolve
 - GEOSITE,private,DIRECT
 - GEOIP,private,DIRECT,no-resolve
 - DOMAIN,services.googleapis.cn,节点选择
@@ -674,6 +770,10 @@ rules:
 - MATCH,节点选择
 geo-auto-update: true
 geo-update-interval: 24
+tun:
+  dns-hijack:
+  - any:53
+  - tcp://any:53
 ```
 
 ### `Caddyfile`
@@ -911,6 +1011,97 @@ WantedBy=timers.target
 }
 ```
 
+## 附录 C：Mac 本机 DNS 防护模板
+
+只按第 6.5 节在 Mac 安装，不在 Ubuntu 服务器执行。PF helper 每次运行重新枚举物理接口，未匹配到接口时停止。
+
+### `macos-dns-guard.sh`
+
+<!-- file: macos-dns-guard.sh -->
+```sh
+#!/bin/sh
+set -eu
+PATH=/usr/bin:/bin:/usr/sbin:/sbin
+export PATH
+render_rules() {
+  awk '/^(en|bridge)[0-9]+$/ {
+    if (n++) interfaces = interfaces ", "; interfaces = interfaces $0
+  } END {
+    if (!n) exit 1
+    printf "block drop out quick on { %s } proto { tcp udp } from any to any port { 53, 853 }\n", interfaces
+  }'
+}
+if [ "${1:-}" = --print-rules ]; then
+  shift
+  printf '%s\n' "$@" | render_rules
+  exit
+fi
+[ "$#" -eq 0 ]
+[ "$(id -u)" -eq 0 ]
+anchor=com.apple/000.clash-dns-guard
+rules=/etc/pf.anchors/local.clash-dns-guard
+temporary=$(mktemp /etc/pf.anchors/.clash-dns-guard.XXXXXX)
+trap 'rm -f "$temporary"' EXIT
+ifconfig -l | tr ' ' '\n' | render_rules > "$temporary"
+pfctl -n -a "$anchor" -f "$temporary"
+chmod 644 "$temporary"
+mv "$temporary" "$rules"
+pfctl -a "$anchor" -f "$rules"
+token=/var/run/local.clash-dns-guard.token
+if [ ! -s "$token" ]; then
+  output=$(pfctl -E 2>&1)
+  value=$(printf '%s\n' "$output" | awk '/Token/ {print $NF}')
+  [ -n "$value" ]
+  umask 077
+  printf '%s\n' "$value" > "$token"
+fi
+```
+
+### `local.clash-dns-guard.plist`
+
+<!-- file: local.clash-dns-guard.plist -->
+```xml
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0"><dict>
+  <key>Label</key><string>local.clash-dns-guard</string>
+  <key>ProgramArguments</key><array><string>/usr/local/libexec/clash-dns-guard</string></array>
+  <key>RunAtLoad</key><true/>
+</dict></plist>
+```
+
+### `macos-dns-rollback.sh`
+
+<!-- file: macos-dns-rollback.sh -->
+```sh
+#!/bin/sh
+# First installation only: existing guards must use their own saved rollback.
+set -eu
+PATH=/usr/bin:/bin:/usr/sbin:/sbin
+export PATH
+[ "$(id -u)" -eq 0 ]
+trial=/var/run/local.clash-dns-guard.trial
+case "${1:-}" in
+  --watch)
+    sleep 120
+    mkdir "$trial/decision" 2>/dev/null || exit 0
+    ;;
+  --rollback) ;;
+  *) exit 2 ;;
+esac
+launchctl bootout system/local.clash-dns-guard 2>/dev/null || true
+pfctl -a com.apple/000.clash-dns-guard -f /dev/null
+token=/var/run/local.clash-dns-guard.token
+if [ -s "$token" ]; then
+  pfctl -X "$(cat "$token")"
+  rm -f "$token"
+fi
+rm -f /usr/local/libexec/clash-dns-guard \
+  /Library/LaunchDaemons/local.clash-dns-guard.plist \
+  /etc/pf.anchors/local.clash-dns-guard
+printf 'ROLLED_BACK\n' > "$trial/result"
+```
+
 ## 仓库本地验证
 
-`python3 tests/validate.py` 会提取并渲染本 README 的模板，检查凭据复用、参数替换、统计跨月、异常保留与超额显示。它只操作临时目录，不连接 AWS、不创建资源。设置 `CADDY_BIN` 可额外执行本地 HTTP 与信号重载测试；设置 `MIHOMO_BIN` 和 `MIHOMO_DATA_DIR` 可执行核心配置校验。测试通过仍需按第 10 节验证新部署。
+`python3 tests/validate.py` 会提取并渲染本 README 的模板，检查凭据复用、参数替换、统计跨月、异常保留、超额显示、DNS 固定出口、规则顺序及物理接口过滤。它只操作临时目录，不连接 AWS、不创建资源。设置 `CADDY_BIN` 可额外执行本地 HTTP 与信号重载测试；设置 `MIHOMO_BIN` 和 `MIHOMO_DATA_DIR` 可执行核心配置校验和“节点断开且选择器 DIRECT 时 DNS 不回退”的隔离回归。PF 测试仅生成规则文本并以替身命令验证超时回退与已提交保留，不加载系统防火墙；HTTP 测试需要允许监听回环端口。测试通过仍需按第 10 节验证新部署。
