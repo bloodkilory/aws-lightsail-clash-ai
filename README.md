@@ -4,7 +4,7 @@
 
 本文件包含完整配置和脚本，单独下载 README 即可交给有浏览器、终端和文件操作能力的 AI 执行。账号登录、付款信息、验证码和授权由账号所有者完成；其余步骤连续执行。**“一键”指一次下达任务后由 AI 推进，不代表跳过云资源费用和权限确认。**
 
-更新日期：2026-10-27。基础链路来自实际部署；以下模板已脱敏。价格、赠金活动、客户端版本应在执行当天复核。新账号、新服务器仍须完成本文验收，不能把既有案例当成本次成功证据。
+更新日期：2026-11-02；双栈恢复实测日期：2026-10-30。基础链路来自实际部署；以下模板已脱敏。价格、赠金活动、客户端版本应在执行当天复核。新账号、新服务器仍须完成本文验收，不能把既有案例当成本次成功证据。
 
 ## 1. 复制这段话给 AI
 
@@ -12,7 +12,7 @@
 请完整阅读这份 README，并按顺序实施。
 
 目标：部署个人使用的 AWS Lightsail 新加坡节点，让 Mac 和 Android
-通过同一条 HTTPS 订阅使用；国内和局域网直连、国外走节点；
+通过同一条 HTTPS 订阅使用，IPv4 优先、IPv6 备用；国内和局域网直连、国外走节点；
 Google Play 可下载；Clash 显示本月服务器 NetworkIn + NetworkOut / 套餐额度；
 Claude 官方请求与 DNS 固定经 AWS；Mac 阻止物理网卡直接发出 53/853 流量。
 
@@ -43,9 +43,10 @@ AI 先读取现有环境，再填写下表；只有账号归属、费用上限�
 | `REGION` | `ap-southeast-1`，新加坡 |
 | `INSTANCE_NAME` | `personal-proxy-sg`；已有实例则使用实际名称 |
 | `SERVER_IPV4` | 实例绑定的静态公网 IPv4，不能填动态地址或示例地址 |
+| `SERVER_IPV6` | 同一实例的真实公网 IPv6，启用双栈并核对 443 入站后填写 |
 | `SNI` | `www.amazon.com`；必须先从服务器验证目标 TLS 能力 |
 | `QUOTA_BYTES` | `2199023255552`，本模板按 2 × 1024⁴ 显示 2TB；套餐不同时修改 |
-| `NODE_NAME` | `AWS 新加坡` |
+| 节点与组名 | `AWS 新加坡 IPv4`、`AWS 新加坡 IPv6`；自动切换组 `AWS 新加坡` |
 | `SSH_PATH` | Lightsail 浏览器 SSH，或已经授权且限制来源的 SSH |
 | `LOCAL_CLIENT` | Mac：Clash Verge Rev；Android：维护中的 Mihomo 客户端 |
 
@@ -57,7 +58,7 @@ AI 先读取现有环境，再填写下表；只有账号归属、费用上限�
 2. Xray、订阅服务和流量定时器启用；Google、YouTube、UDP 测试通过。
 3. 国内业务请求匹配 `DIRECT`；国外请求和 Google Play 入口匹配代理；Claude 官方请求及 DNS 固定 AWS。
 4. HTTPS 订阅通过正常证书校验，错误路径返回 404，下载内容与服务器源文件一致。
-5. Mac 用远程订阅显示月流量；手机端逐项标注“已实测”或“待用户验证”。
+5. Mac 用远程订阅显示月流量；Mac 和手机分别固定 IPv4、IPv6 节点验证真实 HTTPS。手机 Wi-Fi、移动数据分别记录，未测不得写通过。
 6. Mac TUN 的 UDP/TCP DNS 均可用，物理网卡 53/853 出站被拦截；切订阅和重启后复验。
 
 ## 3. 选服务器、获取并核实赠金
@@ -107,11 +108,11 @@ AI 先读取现有环境，再填写下表；只有账号归属、费用上限�
 | 协议与端口 | 来源 | 用途 |
 |---|---|---|
 | TCP 22 | Lightsail 浏览器 SSH；或已授权的固定来源 `/32` | 维护 |
-| TCP 443 | 公网 IPv4 | Xray REALITY |
+| TCP 443 | 公网 IPv4；经授权的公网 IPv6 `::/0` | Xray REALITY 双栈入口 |
 | TCP 8443 | 公网 IPv4 | HTTPS 订阅 |
 | TCP 80 | 公网 IPv4 | ACME HTTP-01 验证；普通路径 404 |
 
-本模板不开放公网 IPv6 入站，也不开放 UDP 443、管理面板、2019 或 Mihomo 控制端口。客户端 IPv6 与服务器入站防火墙是两件事，不要为此盲目关闭设备 IPv6。
+双栈只新增 IPv6 TCP 443 入站；80/8443 仍仅开放 IPv4，不开放 UDP 443、管理面板、2019 或 Mihomo 控制端口。客户端 IPv6 开关、所在网络的 IPv6 能力、服务监听和 AWS IPv6 防火墙需分别核实。服务器使用 `listen: "::"`，在 Ubuntu 上核对 IPv4 与 IPv6 均能连接；不能只凭监听列表认定双栈可用。
 
 若 UFW 已启用，按相同范围补齐规则；不要清空已有规则。22 的来源限制不能遗漏 IPv6。
 
@@ -164,6 +165,7 @@ install -m 755 caddy /usr/local/bin/caddy-subscription
   "REGION": "ap-southeast-1",
   "INSTANCE_NAME": "personal-proxy-sg",
   "SERVER_IPV4": "<从控制台读取的静态公网IPv4>",
+  "SERVER_IPV6": "<从同一实例读取的公网IPv6>",
   "SNI": "www.amazon.com",
   "QUOTA_BYTES": 2199023255552
 }
@@ -200,13 +202,13 @@ ss -ltnp 'sport = :443'
 | 设备 | 默认做法 | 本案例证据 |
 |---|---|---|
 | macOS | 官方 Clash Verge Rev，使用维护中的 Mihomo 内核 | 2.5.8 / Mihomo 1.19.32 实测通过 |
-| Android | 官方维护中的 Clash Meta for Android / 兼容 Mihomo 客户端；已有可用 Bettbox 可复用 | 用户实际使用 Bettbox 后确认连接及 Play 下载正常 |
+| Android | 官方维护中的 Clash Meta for Android / 兼容 Mihomo 客户端；已有可用 Bettbox 可复用 | Bettbox 1.19.7 于 2026-10-30 实测 IPv4/IPv6 HTTPS 成功；此前用户确认 Play 下载正常 |
 | Windows | 官方 Clash Verge Rev，执行同样的连接验收 | 本案例没有 Windows 实机验收 |
 | iOS | 支持当前 VLESS/REALITY 的客户端，先核对格式 | 本案例没有 iOS 实机验收 |
 
 客户端从项目官方 Release 下载并核对发布者；不要只按 App 名字判断协议支持。[Clash Verge Rev](https://github.com/clash-verge-rev/clash-verge-rev/releases)、[Clash Meta for Android](https://github.com/MetaCubeX/ClashMetaForAndroid/releases)
 
-**已复现的版本陷阱：** CMFA 2.10.4 内置的 Mihomo 1.18.8 在本节点上出现 `REALITY authentication failed`；同一配置用 Mihomo 1.19.32 成功。遇到这种日志先核对内核与 `support-x25519mlkem768`，不要反复改域名规则。这里是特定版本组合的实测结果，不是所有 REALITY 服务的通用最低版本声明。
+**历史版本记录（不作为当前超时的诊断结论）：** CMFA 2.10.4 内置的 Mihomo 1.18.8 在本节点上出现 `REALITY authentication failed`；同一配置用 Mihomo 1.19.32 成功。遇到这种日志先核对内核与 `support-x25519mlkem768`，不要反复改域名规则。这里是特定版本组合的历史结果，不是所有 REALITY 服务的通用最低版本声明。后续排查确认已安装 Mihomo 1.19.32 与 Xray 26.10.21 能正常连接，未降级 Xray。一次第三方中转的 `REALITY authentication failed` 不能证明两端不兼容；先对照直连、服务器回环和另一条已验证链路。
 
 ### 6.2 导入与测试
 
@@ -215,6 +217,7 @@ ss -ltnp 'sport = :443'
 3. 模式设为 **规则**，`节点选择` 选 `AWS 新加坡`；Mac 开启 TUN。TUN 已开启时系统代理关闭也可以正常工作，不强制两个开关同时打开。
 4. 测试必须通过新节点。独立测试内核可用 `127.0.0.1:17900`、关闭测试 TUN、绑定实际物理网卡，避免经旧机场转发；结束后停止测试进程。
 5. 从真实客户端做下列检查，记录状态和实际出口。只显示延迟或配置解析成功，不算连接验收。
+6. 分别临时切全局模式、固定 `AWS 新加坡 IPv4` 与 `AWS 新加坡 IPv6`，检查实际连接链，避免自动备用掩盖单节点故障；两端均测试 Google 204、Amazon/GitHub 200 和 TLS 校验。测试后恢复规则模式，`节点选择` 选 `AWS 新加坡`。`curl -4/-6` 约束目标地址解析，不等于固定代理入口，必须同时固定节点。
 
 ```bash
 # 端口改成实际客户端 mixed-port；本模板为 7897。
@@ -225,12 +228,20 @@ curl --max-time 20 -x http://127.0.0.1:7897 -o /dev/null -w '%{http_code}\n' htt
 
 应分别得到服务器静态 IP、204、正常 YouTube 响应。另用支持 SOCKS5 UDP ASSOCIATE 的工具验证 XUDP：仅在隔离测试内核中临时使用 `rules: ["MATCH,AWS 新加坡"]`，查询 `8.8.8.8:53` 并收到响应，测试后销毁该临时配置。正式配置会拒绝未被 TUN 接管的 53 流量，不能用它执行这项绕过 DNS 模块的测试；普通 `curl` 无法证明 UDP 通。
 
+### 6.2.1 Bettbox 双栈与订阅更新
+
+在 Bettbox 1.19.7 的“更多 → 内核配置 → 常规”开启 **IPv6**，并核对 VPN 已启动；不同版本以实际页面为准。订阅里的 `ipv6: true` 不能替代 App 的全局开关。本案例该开关关闭时 IPv6 节点一直超时，开启后恢复。IPv6 节点仍要求所在 Wi-Fi 或移动网络提供 IPv6；不支持 IPv6 的网络使用 IPv4 节点。
+
+换 IP 后必须修改原订阅的 URL 主机，再同步；只点“刷新”仍会请求旧地址。如果保存新 URL 报 `HandshakeException: Connection terminated during handshake`，先暂停仍指向旧 IP 的 VPN，直连验证新订阅返回 200 且证书正常，再保存/同步新 URL，成功后恢复 VPN。若直连也失败，继续查 TLS 和端口，不能关闭证书校验。本案例暂停旧代理后更新成功。
+
+更新后重新打开配置核对 URL 已保存、订阅时间与节点地址已刷新；失败的“保存”可能没有持久化。手机要单独验证，Mac 成功不代表手机成功。USB 仅用于调试，结束隔离窗口后再验证 VPN 和真实访问仍工作；未经授权不镜像其他 App。
+
 ### 6.3 业务分流与 DNS 固定出口
 
 附录 `clash.yaml` 是唯一配置基线。业务规则按以下顺序执行：
 
 ```text
-服务器 IP → DIRECT（防止连接节点自身形成循环）
+服务器 IPv4/IPv6 → DIRECT（防止连接节点自身形成循环）
 Claude / Anthropic 官方域名及指定日志端点 → AWS 新加坡
 已知 DoH / HTTPDNS、853 端口 → AWS 新加坡；未被 TUN 接管的 53 → REJECT
 局域网域名 / 私有 IP → DIRECT
@@ -242,7 +253,7 @@ cn 域名 / CN IP → DIRECT
 
 `geolocation-!cn` 仍在 `cn` 前，避免集合重叠导致海外业务直连。Claude 使用显式规则固定到 `AWS 新加坡`，不随通用选择器切到 `DIRECT`；本配置覆盖官方域名及本案例观察到的两个日志端点，不改变 Claude Code/CLI 的第三方 API 设置，也不代表登录或订阅权限已通过。
 
-DNS 采用同一组带 `#AWS 新加坡` 的 Cloudflare / Google DoH，统一用于 `nameserver`、`default-nameserver`、`proxy-server-nameserver`、`direct-nameserver`；Google 请求显式设置空 ECS。节点与 DoH 均使用 IP，启动不依赖直连 DNS。删除旧版国内直连 DNS policy，不再保留重复的按域名 DNS 列表。[Mihomo DNS 配置](https://wiki.metacubex.one/en/config/dns/)
+DNS 采用同一组带 `#AWS 新加坡` 的 Cloudflare / Google DoH，统一用于 `nameserver`、`default-nameserver`、`proxy-server-nameserver`、`direct-nameserver`；Google 请求显式设置空 ECS。节点与 DoH 均使用 IP，启动不依赖直连 DNS。移除会使查询绕过 AWS 的旧国内直连 DNS policy；已有经过实测的精确加密解析例外逐项保留，不能不加区分地清空覆盖脚本。例如既有小红书 CDN 的 ECS 策略应保留并单独验证。[Mihomo DNS 配置](https://wiki.metacubex.one/en/config/dns/)
 
 **国内业务仍直连，但解析依赖 AWS。** AWS 不可用时，未缓存的国内、国外域名都会解析失败，不回退系统或明文 DNS；缓存、已有连接不一定立即失效。不能把这一行为写成“代理停了国内上网也不受影响”。若内网名称只由路由器或企业 DNS 提供，本基线不会自动查询它，先确认所需内网名称再设置精确例外。
 
@@ -316,11 +327,19 @@ sudo /bin/sh /var/run/local.clash-dns-guard.trial/rollback.sh --rollback
 
 提交后再核对 `launchctl print system/local.clash-dns-guard`、anchor 和 helper 的网卡列表。重启内核、切换订阅、重启 Mac 各自复验；未执行的项目写“未测”。停代理后的失败保护测试优先使用隔离内核，不为文档校验中断正在使用的网络。
 
+手机仅获得订阅里的 DNS 与路由配置，Mac 的 PF/开机任务不会同步到手机；同一 Wi-Fi 下也不会让手机自动继承 Mac 防护。
+
 ### 6.6 与其他订阅共存
 
 AWS 订阅的固定 IP 无需直连 bootstrap。其他订阅若用域名连接节点，不能照搬“节点域名也经该节点解析”，否则会循环依赖。只在该订阅的 Merge 中把 `default-nameserver` 与 `proxy-server-nameserver` 设置为 IP 形式的加密 bootstrap（如 `https://223.5.5.5/dns-query#DIRECT`）；普通 `nameserver`、`direct-nameserver` 仍经该订阅已验证的节点，不能保留会抢先匹配的旧直连 DNS policy。此分支允许节点启动所需的直连加密查询，保护范围与 AWS 基线不同。
 
 不要只凭 HTTP 204 延迟测速选 DNS 出口：本案例曾出现测速正常、真实 TLS 失败的节点。用多个国内外域名完成证书校验和真实解析，再固定可用节点；切换订阅及重启后重新检查。不要把某个机场节点名或一次成功写成全部节点可用。
+
+### 6.7 Apple Music 分流与证书问题
+
+先用相同资源对比直连和 AWS 的状态码、TLS 校验、首字节时间及下载耗时，再按精确域名加入直连规则。本案例只新增了 `DOMAIN,p50-buy.itunes.apple.com,DIRECT`；未把所有 Apple、iTunes 或 mzstatic 域名加入白名单。模板保留这条精确规则，其他网络仍须复测。
+
+曾出现 `is1-ssl.mzstatic.com` 身份验证弹窗；后续代理链路证书校验成功，真实封面资源返回 200，不能据此宣称当时弹窗的根因已查清或已完成 App 内持续播放验收。测试域名根路径返回 403 不等于证书无效，应测试实际资源。不要用关闭校验、安装未知根证书或泛域名直连来掩盖问题。
 
 ## 7. 生成可自动更新的 HTTPS 订阅
 
@@ -443,7 +462,8 @@ AI 按实际结果填写，未知项不能写通过：
 | 检查 | 通过条件 |
 |---|---|
 | 账号与费用 | 实例套餐、地区、赠金产品范围与到期日已核对 |
-| 网络入口 | 443/8443/80 与授权一致；22 未全网开放 |
+| 网络入口 | IPv4 443/8443/80、IPv6 仅 TCP 443 与授权一致；22 未全网开放 |
+| 双栈与网络切换 | Mac/手机各自固定 IPv4、IPv6 请求成功并核对实际链路；手机 Wi-Fi/移动数据分别记录 |
 | Xray | 配置测试通过、服务 active/enabled、443 监听 |
 | 客户端 TCP/UDP | 正确出口、Google 204、YouTube 可访问、UDP DNS 收到响应 |
 | 分流和 DNS | 国内业务 DIRECT、Claude 与 DoH 固定 AWS、Play 入口命中指定规则 |
@@ -457,7 +477,7 @@ AI 按实际结果填写，未知项不能写通过：
 | 权限 | 凭据 0600、专用 API 允许、无关 API 被拒绝 |
 | UI | Mac 远程订阅卡片出现用量；手机单独核对 |
 
-本案例已跑通服务器、Mac、手机连接和 Play 下载；流量响应头和 Mac 远程订阅用量信息已有证据，手机流量卡片仍待实机核对。后续完成了 AWS 固定 DNS、物理网卡防护及 TUN 连通性修复；各订阅切换与内核测试的结果需逐项保留，不能推广成所有节点或整机重启均通过。仓库回归使用脱敏配置，不重新部署服务器或修改本机网络。
+截至 2026-10-30，本案例 Mac 和 Bettbox 在当时 Wi-Fi 下分别固定 IPv4/IPv6，均取得 Google 204、Amazon/GitHub 200 且 TLS 校验正常；Mac 有连接链证据，手机显式本地代理出口与 AWS 一致。两端已恢复规则模式、IPv4 优先/IPv6 备用，关闭手机隔离窗口后 VPN 仍工作。更新后的移动数据切网未复测。Play 下载属于此前用户确认，不冒充本次重新下载；手机卡片显示过用量与刷新时间，但未保存与 AWS 同时刻精确对账证据。流量响应头与 Mac 用量已有历史证据。后续完成了 AWS 固定 DNS、物理网卡防护及 TUN 连通性修复；各订阅切换与内核测试的结果需逐项保留，不能推广成所有节点或整机重启均通过。仓库回归使用脱敏配置，不重新部署服务器或修改本机网络。
 
 ## 11. 维护、续跑与故障定位
 
@@ -472,12 +492,31 @@ AI 按实际结果填写，未知项不能写通过：
 
 先读状态、检查文件和服务，再执行未完成阶段。首次安装命令不用于覆盖已有部署。恢复时只使用本次保存的旧配置，先验证再重载对应服务；不删除实例、静态 IP、其他订阅或 AWS 组织策略。不要重新生成 `identity.json`，否则现有客户端会失效。
 
-若静态公网 IP 发生变化，同步修改客户端地址、节点直连规则、Caddy 地址及证书、IAM 来源 IP 条件，并重新完成订阅与流量检查。
+### IPv4 超时、换 IP 与旧地址清理
+
+1. 先区分物理链路、协议握手、订阅下载与业务分流。检查当前实际加载的配置；固定物理网卡或关闭测试内核 TUN，避免测试经其他代理绕行。SSH 若只允许浏览器 SSH，本机 22 超时是预期，不把它当作故障证据。
+2. 通过浏览器 SSH 核对实例、Xray/Caddy 服务、443/8443 监听、IPv4/IPv6 防火墙及服务器出站；同时对照另一正常站点，并用 Wi-Fi/移动数据分别测端口。服务器健康不等于本地路径可达。
+3. 要查明丢包位置，应在释放旧 IP 前保留双方时间对应的抓包、不同网络和路径对照证据。旧 IP 多端口超时、同一实例换 IP 后恢复，只能支持“旧 IP 或其路径异常”，不能确定是运营商封禁、AWS 网络还是途中路由。本案例恢复了可用性，但旧 IPv4 的丢包位置没有查明。
+4. 已获换 IP 授权后，保留旧地址作短期回退，将新静态 IPv4 绑定原实例。修改私密 `params.json`、服务器订阅的 IPv4 节点及 `/32` 直连规则、Caddy 站点地址与 `default_sni`，签发新 IP 的正式证书；保留 UUID、密钥、short ID、订阅 token、其他 DNS/分流规则和 IPv6 地址。
+5. 同步更新专用 IAM 策略的 `aws:SourceIp` 为新地址 `/32`；不更换访问密钥、不扩大 API 权限。手动运行流量采集，核对最新月份、时间、服务退出码和实际响应头，不能用旧缓存用量宣称采集恢复。
+6. 两端原远程订阅的 URL 主机也须替换，路径/token 不变；手机按 6.2.1 处理旧 VPN 对更新的影响。分别验证新 IPv4/IPv6、HTTPS 订阅正文一致、流量采集及默认模式。
+7. 新地址验证成功且已有用户释放授权后，释放旧静态 IP，再查询地址列表确认只保留所需资源。释放后不能保证拿回原地址，也不能继续在原实例上对旧地址抓包。
+
+Lightsail 静态 IPv4 附加实例时不另收静态 IP 费用；未附加超过一小时按 **0.005 美元/小时**收费。这是保留闲置地址的费用，不是代理使用超过一小时收费。按执行当天 [Lightsail 官方 FAQ](https://aws.amazon.com/lightsail/faq/) 复核，避免混用 EC2 公网 IPv4 计费规则。
+
+### 双栈自动切换的边界
+
+`AWS 新加坡` 是 `fallback` 组，按 IPv4、IPv6 顺序选首个健康节点，周期检测为 300 秒；不是按延迟选最快，也不保证故障瞬间无缝切换。两个入口仍是同一服务器，不能防止整台服务器故障。IPv6 入口可以访问仅 IPv4 的目标网站，入口协议与服务器出口是两回事。[Mihomo fallback 文档](https://wiki.metacubex.one/en/config/proxy-groups/fallback/)
+
+订阅下载仍使用 IPv4 的 HTTPS 地址；IPv6 代理可用不代表旧 IPv4 的订阅地址会自动变成新地址。保存私密的新订阅链接，换设备时重新核对主机。二维码包含订阅凭据，只在用户本机展示，不提交仓库或在线转换网站。
+
 
 | 现象 | 先核对 | 修复方向 |
 |---|---|---|
 | CloudShell 无法创建环境 | 新账号验证状态 | 使用 Lightsail 浏览器 SSH |
-| `REALITY authentication failed` | 内核版本、UUID、公钥、short ID、SNI、混合密钥交换支持 | 更新兼容客户端；不要先改规则 |
+| `REALITY authentication failed` | 认证参数、内核版本以及直连/回环/中转对照 | 有版本不兼容证据才更新；单次中转失败不能直接归因 Xray |
+| 手机 IPv4 正常、IPv6 超时 | Bettbox 全局 IPv6、所在网络 IPv6、服务器监听与 IPv6 443 | 开启对应客户端支持并分别验收，不只改订阅字段 |
+| 新订阅保存时 TLS 握手中断 | 是否仍运行旧 IP 的 VPN；暂停后的直连对照 | 直连证书正常后更新 URL、同步并恢复 VPN |
 | 全局正常、规则模式 Play 失败 | `services.googleapis.cn` 的实际命中规则 | 把精确域名规则放到 CN 规则前，并更新服务器订阅 |
 | 海外页面仍出现国内 DNS/出口 | 最终生效 DNS、覆盖脚本、真实连接与物理抓包 | 使用固定 AWS DoH；区分系统 DNS 显示值与实际出站 |
 | 加固后国内外 HTTPS 都超时 | PF 是否包含 `! lo0` 或 `utun*`、TUN TCP/UDP DNS | 回退本次 PF，再只对物理接口加载；不要盲目修改业务分流 |
@@ -524,6 +563,10 @@ def main():
     ip = ipaddress.ip_address(params["SERVER_IPV4"])
     if ip.version != 4 or not ip.is_global:
         raise ValueError("SERVER_IPV4 must be the attached public static IPv4")
+    ip6 = ipaddress.ip_address(params["SERVER_IPV6"])
+    if ip6.version != 6 or not ip6.is_global:
+        raise ValueError("SERVER_IPV6 must be the instance public IPv6")
+    params["SERVER_IPV6"] = str(ip6)
     for key in ("REGION", "INSTANCE_NAME", "SNI"):
         if not re.fullmatch(r"[A-Za-z0-9.-]+", params[key]):
             raise ValueError(f"Invalid {key}")
@@ -586,7 +629,7 @@ if __name__ == "__main__":
   "inbounds": [
     {
       "tag": "vless-reality",
-      "listen": "0.0.0.0",
+      "listen": "::",
       "port": 443,
       "protocol": "vless",
       "settings": {
@@ -718,7 +761,7 @@ dns:
   - https://1.1.1.1/dns-query#AWS 新加坡
   - https://8.8.8.8/dns-query#AWS 新加坡&ecs=0.0.0.0/0&ecs-override=true
 proxies:
-- name: AWS 新加坡
+- name: AWS 新加坡 IPv4
   type: vless
   server: "@@SERVER_IPV4@@"
   port: 443
@@ -734,7 +777,31 @@ proxies:
     public-key: "@@PUBLIC_KEY@@"
     short-id: "@@SHORT_ID@@"
     support-x25519mlkem768: true
+- name: AWS 新加坡 IPv6
+  type: vless
+  server: "@@SERVER_IPV6@@"
+  port: 443
+  uuid: "@@UUID@@"
+  flow: xtls-rprx-vision
+  tls: true
+  servername: "@@SNI@@"
+  client-fingerprint: chrome
+  network: tcp
+  udp: true
+  packet-encoding: xudp
+  reality-opts:
+    public-key: "@@PUBLIC_KEY@@"
+    short-id: "@@SHORT_ID@@"
+    support-x25519mlkem768: true
 proxy-groups:
+- name: AWS 新加坡
+  type: fallback
+  proxies:
+  - AWS 新加坡 IPv4
+  - AWS 新加坡 IPv6
+  url: https://www.gstatic.com/generate_204
+  interval: 300
+  lazy: false
 - name: 节点选择
   type: select
   proxies:
@@ -742,6 +809,8 @@ proxy-groups:
   - DIRECT
 rules:
 - IP-CIDR,@@SERVER_IPV4@@/32,DIRECT,no-resolve
+- IP-CIDR6,@@SERVER_IPV6@@/128,DIRECT,no-resolve
+- DOMAIN,p50-buy.itunes.apple.com,DIRECT
 - DOMAIN-SUFFIX,anthropic.com,AWS 新加坡
 - DOMAIN-SUFFIX,claude.ai,AWS 新加坡
 - DOMAIN-SUFFIX,claude.com,AWS 新加坡

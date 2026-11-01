@@ -17,7 +17,7 @@ TEXT = README.read_text()
 BLOCKS = dict(re.findall(r'<!-- file: ([\w.-]+) -->\n```[^\n]*\n(.*?)\n```', TEXT, re.S))
 renderer = types.ModuleType('renderer')
 exec(compile(BLOCKS['render.py'], 'README:render.py', 'exec'), renderer.__dict__)
-PARAMS = {'SERVER_IPV4': '8.8.8.8', 'REGION': 'ap-southeast-1',
+PARAMS = {'SERVER_IPV4': '8.8.8.8', 'SERVER_IPV6': '2606:4700:4700::1111', 'REGION': 'ap-southeast-1',
           'INSTANCE_NAME': 'personal-proxy-sg', 'SNI': 'www.amazon.com',
           'QUOTA_BYTES': 2 * 1024 ** 4}
 IDENTITY = {'UUID': '11111111-1111-4111-8111-111111111111',
@@ -51,6 +51,23 @@ class GuideTests(unittest.TestCase):
                 for path in (root / 'bundle').iterdir():
                     self.assertEqual(path.stat().st_mode & 0o777, 0o600)
                 self.assertIn('8.8.8.8:8443/synthetic-test-token', (root / 'bundle/subscription-url.txt').read_text())
+
+    def test_dual_stack_render_and_invalid_address(self):
+        body = RENDERED['clash.yaml']
+        self.assertIn('IP-CIDR6,2606:4700:4700::1111/128,DIRECT,no-resolve', body)
+        self.assertIn('  - AWS 新加坡 IPv4\n  - AWS 新加坡 IPv6', body)
+        self.assertEqual(json.loads(RENDERED['xray.json'])['inbounds'][0]['listen'], '::')
+        self.assertIn('- DOMAIN,p50-buy.itunes.apple.com,DIRECT', body)
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            (root / 'README.md').write_text(TEXT)
+            (root / 'render.py').write_text(BLOCKS['render.py'])
+            (root / 'identity.json').write_text(json.dumps(IDENTITY))
+            for invalid in ('::1', 'fe80::1', '8.8.8.8', 'invalid'):
+                (root / 'params.json').write_text(json.dumps({**PARAMS, 'SERVER_IPV6': invalid}))
+                result = subprocess.run([sys.executable, str(root / 'render.py')], capture_output=True)
+                self.assertNotEqual(result.returncode, 0)
+                self.assertFalse((root / 'bundle').exists())
 
     def test_rule_and_dns_order(self):
         body = RENDERED['clash.yaml']

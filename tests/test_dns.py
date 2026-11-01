@@ -121,7 +121,7 @@ class DnsTests(unittest.TestCase):
             root = Path(folder)
             control = str(root / 'control.sock')
             body = RENDERED['clash.yaml'].replace('mixed-port: 7897', 'mixed-port: 0')
-            body = body.replace('server: "8.8.8.8"', 'server: "127.0.0.1"').replace('  port: 443', '  port: 9')
+            body = body.replace('server: "8.8.8.8"', 'server: "127.0.0.1"').replace('server: "2606:4700:4700::1111"', 'server: "::1"').replace('  port: 443', '  port: 9')
             # No live listener or TUN; the proxy can only connect to a closed loopback port.
             body += '\nexternal-controller-unix: ' + json.dumps(control) + '\n'
             body = body.replace('store-selected: true', 'store-selected: false')
