@@ -23,7 +23,9 @@ PARAMS = {'SERVER_IPV4': '8.8.8.8', 'SERVER_IPV6': '2606:4700:4700::1111', 'REGI
 IDENTITY = {'UUID': '11111111-1111-4111-8111-111111111111',
             'PRIVATE_KEY': base64.urlsafe_b64encode(bytes(range(32))).decode().rstrip('='),
             'PUBLIC_KEY': base64.urlsafe_b64encode(bytes(range(32, 64))).decode().rstrip('='),
-            'SHORT_ID': '1122334455667788', 'SUB_TOKEN': 'synthetic-test-token'}
+            'SHORT_ID': '1122334455667788', 'SUB_TOKEN': 'synthetic-test-token',
+            'HY2_PASSWORD': 'synthetic-auth-not-a-secret',
+            'HY2_OBFS_PASSWORD': 'synthetic-obfs-not-a-secret'}
 RENDERED = {name: renderer.render(body, {**PARAMS, **IDENTITY})
             for name, body in BLOCKS.items() if name != 'render.py'}
 
@@ -55,7 +57,8 @@ class GuideTests(unittest.TestCase):
     def test_dual_stack_render_and_invalid_address(self):
         body = RENDERED['clash.yaml']
         self.assertIn('IP-CIDR6,2606:4700:4700::1111/128,DIRECT,no-resolve', body)
-        self.assertIn('  - AWS 新加坡 IPv4\n  - AWS 新加坡 IPv6', body)
+        self.assertIn('  - AWS 新加坡 IPv6\n  - AWS 新加坡 IPv4', body)
+        self.assertIn('  interval: 60\n  lazy: false', body)
         self.assertEqual(json.loads(RENDERED['xray.json'])['inbounds'][0]['listen'], '::')
         self.assertIn('- DOMAIN,p50-buy.itunes.apple.com,DIRECT', body)
         with tempfile.TemporaryDirectory() as folder:
@@ -68,6 +71,40 @@ class GuideTests(unittest.TestCase):
                 result = subprocess.run([sys.executable, str(root / 'render.py')], capture_output=True)
                 self.assertNotEqual(result.returncode, 0)
                 self.assertFalse((root / 'bundle').exists())
+
+    def test_hysteria_server_and_client_share_credentials(self):
+        server = json.loads(RENDERED['hysteria.json'])
+        client = RENDERED['clash.yaml'].split('- name: AWS 新加坡 IPv4\n')[1].split('- name: AWS 新加坡 IPv6')[0]
+        self.assertEqual(server['listen'], '0.0.0.0:443')
+        self.assertEqual(server['auth']['type'], 'password')
+        self.assertIn('  type: hysteria2', client)
+        self.assertIn('  password: "' + server['auth']['password'] + '"', client)
+        self.assertEqual(server['obfs']['type'], 'salamander')
+        self.assertIn('  obfs-password: "' + server['obfs']['salamander']['password'] + '"', client)
+        self.assertIn('  skip-cert-verify: false', client)
+        self.assertNotIn('servername:', client)
+        self.assertNotIn('uuid:', client)
+        self.assertIn('/8.8.8.8/8.8.8.8.crt', server['tls']['cert'])
+        self.assertIn('User=clash-sub', RENDERED['hysteria.service'])
+        blocked = json.loads(RENDERED['xray.json'])['routing']['rules'][0]['ip']
+        self.assertEqual(server['acl']['inline'], ['reject(' + cidr + ')' for cidr in blocked] + ['direct(all)'])
+
+    def test_legacy_identity_adds_secrets_once_without_rotation(self):
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            legacy = {k: v for k, v in IDENTITY.items() if not k.startswith('HY2_')}
+            for name, value in [('README.md', TEXT), ('render.py', BLOCKS['render.py']),
+                                ('params.json', json.dumps(PARAMS)), ('identity.json', json.dumps(legacy))]:
+                (root / name).write_text(value)
+            subprocess.run([sys.executable, str(root / 'render.py')], check=True, capture_output=True)
+            migrated = json.loads((root / 'identity.json').read_text())
+            self.assertEqual({k: migrated[k] for k in legacy}, legacy)
+            self.assertGreaterEqual(len(migrated['HY2_PASSWORD']), 43)
+            self.assertNotEqual(migrated['HY2_PASSWORD'], migrated['HY2_OBFS_PASSWORD'])
+            subprocess.run([sys.executable, str(root / 'render.py')], check=True, capture_output=True)
+            self.assertEqual(json.loads((root / 'identity.json').read_text()), migrated)
+            self.assertEqual((root / 'identity.json').stat().st_mode & 0o777, 0o600)
+            self.assertFalse((root / 'identity.tmp').exists())
 
     def test_rule_and_dns_order(self):
         body = RENDERED['clash.yaml']

@@ -1,10 +1,10 @@
 # AWS Lightsail + Clash：AI 执行手册
 
-从选服务器、核实赠金，到部署 VLESS/REALITY、国内外分流、Google Play 下载、HTTPS 订阅、月流量显示、Claude 固定出口及 DNS 加固。默认使用 **Lightsail 新加坡、Ubuntu 24.04 LTS、Xray + Mihomo、Caddy**。
+从选服务器、核实赠金，到部署 IPv6 VLESS/REALITY 主节点、IPv4 Hysteria2 备用节点、国内外分流、Google Play 下载、HTTPS 订阅、月流量显示、Claude 固定出口及 DNS 加固。默认使用 **Lightsail 新加坡、Ubuntu 24.04 LTS、Xray + Hysteria2 + Mihomo、Caddy**。
 
 本文件包含完整配置和脚本，单独下载 README 即可交给有浏览器、终端和文件操作能力的 AI 执行。账号登录、付款信息、验证码和授权由账号所有者完成；其余步骤连续执行。**“一键”指一次下达任务后由 AI 推进，不代表跳过云资源费用和权限确认。**
 
-更新日期：2026-11-02；双栈恢复实测日期：2026-10-30。基础链路来自实际部署；以下模板已脱敏。价格、赠金活动、客户端版本应在执行当天复核。新账号、新服务器仍须完成本文验收，不能把既有案例当成本次成功证据。
+更新日期：2026-11-17。当前模板为 IPv6 优先、IPv4 故障备用；使用占位符，不包含真实服务器地址、账号或凭据。价格、赠金活动、客户端版本应在执行当天复核。新账号、新服务器仍须完成本文验收，不能把模板检查当成实际连接成功的证据。
 
 ## 1. 复制这段话给 AI
 
@@ -12,7 +12,8 @@
 请完整阅读这份 README，并按顺序实施。
 
 目标：部署个人使用的 AWS Lightsail 新加坡节点，让 Mac 和 Android
-通过同一条 HTTPS 订阅使用，IPv4 优先、IPv6 备用；国内和局域网直连、国外走节点；
+通过同一条 HTTPS 订阅使用，IPv6 VLESS/REALITY 优先、IPv4 Hysteria2 备用；
+自动组每 60 秒检查可用性；国内和局域网直连、国外走节点；
 Google Play 可下载；Clash 显示本月服务器 NetworkIn + NetworkOut / 套餐额度；
 Claude 官方请求与 DNS 固定经 AWS；Mac 阻止物理网卡直接发出 53/853 流量。
 
@@ -41,7 +42,7 @@ AI 先读取现有环境，再填写下表；只有账号归属、费用上限�
 | 参数 | 默认或来源 |
 |---|---|
 | `REGION` | `ap-southeast-1`，新加坡 |
-| `INSTANCE_NAME` | `example-proxy-sg`；已有实例则使用实际名称 |
+| `INSTANCE_NAME` | `example-proxy-sg`（虚构示例）；已有实例则使用实际名称 |
 | `SERVER_IPV4` | 实例绑定的静态公网 IPv4，不能填动态地址或示例地址 |
 | `SERVER_IPV6` | 同一实例的真实公网 IPv6，启用双栈并核对 443 入站后填写 |
 | `SNI` | `www.amazon.com`；必须先从服务器验证目标 TLS 能力 |
@@ -55,7 +56,7 @@ AI 先读取现有环境，再填写下表；只有账号归属、费用上限�
 完成标准：
 
 1. 实例、静态 IPv4、套餐费用、赠金适用范围均有实际页面或 API 证据。
-2. Xray、订阅服务和流量定时器启用；Google、YouTube、UDP 测试通过。
+2. Xray、Hysteria2、订阅服务和流量定时器启用；Google、YouTube、UDP 测试通过。
 3. 国内业务请求匹配 `DIRECT`；国外请求和 Google Play 入口匹配代理；Claude 官方请求及 DNS 固定 AWS。
 4. HTTPS 订阅通过正常证书校验，错误路径返回 404，下载内容与服务器源文件一致。
 5. Mac 用远程订阅显示月流量；Mac 和手机分别固定 IPv4、IPv6 节点验证真实 HTTPS。手机 Wi-Fi、移动数据分别记录，未测不得写通过。
@@ -73,7 +74,13 @@ AI 先读取现有环境，再填写下表；只有账号归属、费用上限�
 
 ### 3.2 赠金操作顺序
 
-历史记录中的个人使用信息已移除。
+1. 使用已有 AWS 登录态。新账号由用户填写身份、付款资料、密码和验证码；AI 不读取或保存这些内容。
+2. 打开当前账号的 Free Tier／Explore AWS 活动页，记录实际可获得的任务、金额、限制和截止日期。官方新客页面目前说明初始 100 美元、完成任务再获最高 100 美元；不是每个已有账号都有资格。[官方 Free Tier](https://aws.amazon.com/free/)
+3. **先查看可领取任务，再升级账号能力。** 如果页面有“使用 AWS Budgets 设置成本预算”奖励，按任务入口创建适合当前套餐的预算，完成后刷新活动页与 Credits 页核实到账。没有任务就跳过，不能编造奖励。
+4. 预算只设成本提醒，阈值使用用户确认的月度上限；不要开启自动停止或删除资源的预算动作。若有邮箱通知，确认收件人后配置。
+5. 在 Billing → Credits 逐条确认 `Active`、剩余额度、到期日期和 Applicable products；必须看到 **Amazon Lightsail**。奖励金额和适用范围以该账号实际记录为准，不把其他账号的结果当成人人可领的固定金额。
+6. 若创建资源的项目账号与拥有赠金的账号不同，检查组织账单的 Credit sharing 是否覆盖实际资源账号。无需复制账号 ID 到公开文档。
+7. 创建资源后核对 Bills、Credits 应用记录和 Payments。新建资源的账单存在延迟；“暂时 0 美元”不能证明不计费。赠金耗尽、过期或不适用的费用仍可能收费。[赠金抵扣与组织共享](https://docs.aws.amazon.com/awsaccountbilling/latest/aboutv2/useconsolidatedbilling-credits.html)
 
 ### 3.3 新版账号的地区限制分支
 
@@ -103,21 +110,22 @@ AI 先读取现有环境，再填写下表；只有账号归属、费用上限�
 |---|---|---|
 | TCP 22 | Lightsail 浏览器 SSH；或已授权的固定来源 `/32` | 维护 |
 | TCP 443 | 公网 IPv4；经授权的公网 IPv6 `::/0` | Xray REALITY 双栈入口 |
+| UDP 443 | 公网 IPv4 | Hysteria2 + Salamander 备用入口 |
 | TCP 8443 | 公网 IPv4 | HTTPS 订阅 |
 | TCP 80 | 公网 IPv4 | ACME HTTP-01 验证；普通路径 404 |
 
-双栈只新增 IPv6 TCP 443 入站；80/8443 仍仅开放 IPv4，不开放 UDP 443、管理面板、2019 或 Mihomo 控制端口。客户端 IPv6 开关、所在网络的 IPv6 能力、服务监听和 AWS IPv6 防火墙需分别核实。服务器使用 `listen: "::"`，在 Ubuntu 上核对 IPv4 与 IPv6 均能连接；不能只凭监听列表认定双栈可用。
+IPv6 仅开放 TCP 443；80/8443 和 UDP 443 仍仅开放 IPv4。TCP 443 与 UDP 443 是两条独立规则，可以同时使用；不要误删现有 TCP 规则。不要开放管理面板、2019 或 Mihomo 控制端口。客户端 IPv6 开关、所在网络的 IPv6 能力、服务监听和 AWS IPv6 防火墙需分别核实。Xray 使用 `listen: "::"`，Hysteria 使用 `0.0.0.0:443`；订阅分别使用 IPv6 TCP 和 IPv4 UDP，不能只凭监听列表认定可用。
 
 若 UFW 已启用，按相同范围补齐规则；不要清空已有规则。22 的来源限制不能遗漏 IPv6。
 
 ## 5. 安装并生成服务端配置
 
-以下命令仅在目标 Ubuntu 服务器执行。先确认 `uname -m` 为 `x86_64`，且 443/8443/80 没有其他服务占用。如果已有 Xray 或 Caddy，转到第 11 节做增量维护，不能执行首次安装覆盖。
+以下命令仅在目标 Ubuntu 服务器执行。先确认 `uname -m` 为 `x86_64`，且 TCP 443/8443/80、UDP 443 没有其他服务占用。如果已有 Xray、Hysteria 或 Caddy，转到第 11 节做增量维护，不能执行首次安装覆盖。
 
 ```bash
 uname -m
-sudo ss -ltnp
-sudo systemctl is-active xray clash-subscription || true
+sudo ss -ltunp
+sudo systemctl is-active xray hysteria clash-subscription || true
 sudo install -d -m 700 /root/lightsail-proxy
 sudo apt-get update
 sudo apt-get install -y ca-certificates curl python3 python3-boto3 unzip
@@ -125,7 +133,7 @@ sudo apt-get install -y ca-certificates curl python3 python3-boto3 unzip
 
 ### 5.1 官方二进制
 
-历史记录中的个人使用信息已移除。
+已验证版本：Xray `26.10.21`、Caddy `2.11.7`、Hysteria `2.14.0`。下面固定为这组已测试版本；执行前查看官方 Release 是否撤回或出现必须升级的安全修复。升级时重新核对哈希和客户端兼容性，不能只改版本号。
 
 进入已获授权的 root shell，在 `/root/lightsail-proxy` 执行；下载只使用官方 Release，校验失败立即停止。
 
@@ -143,8 +151,13 @@ curl -fL --retry 2 --connect-timeout 10 --max-time 180 \
 printf '%s  %s\n' 727b91701a392de6ebc5027509f548bf39979e5216340d0faed8fa5e69c84f8b caddy.tar.gz | sha256sum -c -
 tar -xzf caddy.tar.gz caddy
 install -m 755 caddy /usr/local/bin/caddy-subscription
+curl -fL --retry 2 --connect-timeout 10 --max-time 180 \
+  https://github.com/HyNetworks/hysteria/releases/download/app/v2.14.0/hysteria-linux-amd64 -o hysteria
+printf '%s  %s\n' fc25edff9948708cb00a4ff01f3bccde677660aca050133bb1ad46c6860362d2 hysteria | sha256sum -c -
+install -m 755 hysteria /usr/local/bin/hysteria
 /usr/local/bin/xray version
 /usr/local/bin/caddy-subscription version
+/usr/local/bin/hysteria version
 /usr/local/bin/xray tls ping www.amazon.com
 ```
 
@@ -171,7 +184,7 @@ chmod 600 params.json
 python3 render.py
 ```
 
-生成器从本文件附录提取所有模板，在服务器生成 UUID、short ID、X25519 密钥和 256-bit 订阅 token，保存在 `identity.json`，权限 `0600`。重复生成复用同一身份，不轮换凭据。私钥不离开服务器；生成结果在 `bundle/`。
+生成器从本文件附录提取所有模板，在服务器生成 UUID、short ID、X25519 密钥、256-bit 订阅 token，以及两个独立随机的 Hysteria 认证/混淆密码，保存在 `identity.json`，权限 `0600`。重复生成复用同一身份，不轮换凭据；旧身份文件只补缺少的 Hysteria 字段。私钥不离开服务器；生成结果在 `bundle/`。已有 Hysteria 的部署应先安全迁入现有密码，不能用新密码覆盖线上服务。
 
 ### 5.3 启动 Xray
 
@@ -187,19 +200,26 @@ systemctl is-active xray
 ss -ltnp 'sport = :443'
 ```
 
-历史记录中的个人使用信息已移除。
+服务使用无登录用户，只授予绑定低端口的能力；阻止通过代理访问私网、回环和云元数据地址。出口用 `freedom.streamSettings.sockopt.domainStrategy=UseIPv4`，避免继续使用旧字段。
 
 ## 6. 客户端选型、Clash 配置和真实连通性
 
 ### 6.1 客户端
 
-历史记录中的个人使用信息已移除。
+| 设备 | 默认做法 | 验证要求 |
+|---|---|---|
+| macOS | 官方 Clash Verge Rev，使用支持 VLESS/REALITY 与 Hysteria2 的 Mihomo 内核 | 分别验证双协议及自动备用；模板已用 Mihomo 1.19.33 验证 |
+| Android | 官方维护中的 Clash Meta for Android / 兼容 Mihomo 客户端；已有可用 Bettbox 可复用 | Wi-Fi 与移动网络各自验证两节点、Play 下载及订阅刷新 |
+| Windows | 官方 Clash Verge Rev，执行同样的连接验收 | 不以 Mac 结果代替 Windows 实机验收 |
+| iOS | 支持当前 VLESS/REALITY、Hysteria2 和 Salamander 的客户端，先核对订阅格式 | 不能把 Clash 配置测试当成 iOS 导入和连接验收，见 7.4 |
 
 客户端从项目官方 Release 下载并核对发布者；不要只按 App 名字判断协议支持。[Clash Verge Rev](https://github.com/clash-verge-rev/clash-verge-rev/releases)、[Clash Meta for Android](https://github.com/MetaCubeX/ClashMetaForAndroid/releases)
 
-历史记录中的个人使用信息已移除。
+**版本兼容排查：** `REALITY authentication failed` 应结合认证参数、内核版本、`support-x25519mlkem768` 和服务端能力检查，不要反复修改域名规则。模板按 Xray 26.10.21 与维护中的 Mihomo 验证，不构成所有 REALITY 服务的通用最低版本声明。一次第三方中转认证失败不能证明两端不兼容；应对照物理网卡直连、服务器回环和另一条已验证链路。
 
 ### 6.2 导入与测试
+
+本节先准备客户端；完整双节点验收须等第 7 节正式证书及 Hysteria 服务启动后执行。Hysteria2 依赖 UDP，可用的 TCP 连接不能代替其协议握手测试。
 
 1. 从服务器安全取回 `bundle/clash.yaml` 作为临时本地配置，文件权限 `0600`；不要复制 `identity.json` 或 Xray 服务端配置。
 2. 在已有客户端新增独立配置，保留其他订阅、扩展脚本和选择状态。先 `mihomo -t -f clash.yaml`，再启用。
@@ -219,9 +239,9 @@ curl --max-time 20 -x http://127.0.0.1:7897 -o /dev/null -w '%{http_code}\n' htt
 
 ### 6.2.1 Bettbox 双栈与订阅更新
 
-历史记录中的个人使用信息已移除。
+在 Bettbox 1.19.7 的“更多 → 内核配置 → 常规”开启 **IPv6**，并核对 VPN 已启动；不同版本以实际页面为准。订阅里的 `ipv6: true` 不能替代 App 的全局开关。IPv6 节点仍要求所在 Wi-Fi 或移动网络提供 IPv6；不支持 IPv6 的网络使用 IPv4 节点。
 
-历史记录中的个人使用信息已移除。
+换 IP 后必须修改原订阅的 URL 主机，再同步；只点“刷新”仍会请求旧地址。如果保存新 URL 报 `HandshakeException: Connection terminated during handshake`，先暂停仍指向旧 IP 的 VPN，直连验证新订阅返回 200 且证书正常，再保存/同步新 URL，成功后恢复 VPN。若直连也失败，继续查 TLS 和端口，或通过另一条已验证链路更新；不能关闭证书校验。
 
 更新后重新打开配置核对 URL 已保存、订阅时间与节点地址已刷新；失败的“保存”可能没有持久化。手机要单独验证，Mac 成功不代表手机成功。USB 仅用于调试，结束隔离窗口后再验证 VPN 和真实访问仍工作；未经授权不镜像其他 App。
 
@@ -240,9 +260,9 @@ cn 域名 / CN IP → DIRECT
 其余 → 节点选择
 ```
 
-历史记录中的个人使用信息已移除。
+`geolocation-!cn` 仍在 `cn` 前，避免集合重叠导致海外业务直连。Claude 使用显式规则固定到 `AWS 新加坡`，不随通用选择器切到 `DIRECT`；本配置覆盖官方域名及模板列出的两个日志端点，不改变 Claude Code/CLI 的第三方 API 设置，也不代表登录或订阅权限已通过。
 
-历史记录中的个人使用信息已移除。
+DNS 采用同一组带 `#AWS 新加坡` 的 Cloudflare / Google DoH，统一用于 `nameserver`、`default-nameserver`、`proxy-server-nameserver`、`direct-nameserver`；Google 请求显式设置空 ECS。节点与 DoH 均使用 IP，启动不依赖直连 DNS。移除会使查询绕过 AWS 的旧国内直连 DNS policy；已有经过实测的精确加密解析例外逐项保留，不能不加区分地清空覆盖脚本。例如既有 CDN 的 ECS 策略应保留并单独验证。[Mihomo DNS 配置](https://wiki.metacubex.one/en/config/dns/)
 
 **国内业务仍直连，但解析依赖 AWS。** AWS 不可用时，未缓存的国内、国外域名都会解析失败，不回退系统或明文 DNS；缓存、已有连接不一定立即失效。不能把这一行为写成“代理停了国内上网也不受影响”。若内网名称只由路由器或企业 DNS 提供，本基线不会自动查询它，先确认所需内网名称再设置精确例外。
 
@@ -250,15 +270,15 @@ cn 域名 / CN IP → DIRECT
 
 ### 6.4 Google Play 无法下载
 
-历史记录中的个人使用信息已移除。
+如果规则模式下载不动、全局模式可下载，检查下载 CDN 和 `services.googleapis.cn` 的实际路由，确认是否被国内域名规则误判直连。
 
-已采用的最小修复：把 `DOMAIN,services.googleapis.cn,节点选择` 放到 `GEOSITE,cn,DIRECT` 前面；模板已包含。随后更新**服务器订阅源文件**，手机更新订阅、断开重连，在规则模式真实下载一个应用验证。
+对应规则修复：把 `DOMAIN,services.googleapis.cn,节点选择` 放到 `GEOSITE,cn,DIRECT` 前面；模板已包含。随后更新**服务器订阅源文件**，手机更新订阅、断开重连，在规则模式真实下载一个应用验证。
 
 不把全部 `google.cn` 一刀切代理，不先清除 Play 服务数据。若全局模式也失败，先处理节点连接、客户端协议兼容和账号/设备问题，这条规则不能替代根因检查。
 
 ### 6.5 macOS DNS 防护与回退
 
-历史记录中的个人使用信息已移除。
+分两层实施：订阅中的 `tun.dns-hijack` 同时接管 UDP 和 TCP 53；Mac 本机 PF 只阻止物理 `en*` / `bridge*` 接口上的 TCP/UDP 53、853。**禁止使用 `on ! lo0`**：它也会挡住 `utun*`，可能造成 TUN 内 DNS 失败和普通 HTTPS 连接超时。不要改动全局 PF 主规则、清空其他 anchor 或刷新全部连接状态。
 
 这项 PF 防护是 Mac 本机设置，不能随订阅下发给手机。它不识别所有应用自带的 HTTPS DNS；已知 DoH/HTTPDNS 用附录规则处理，未知 443 DNS 仍按普通业务规则匹配。Android 的 Private DNS 也可能绕过 TUN DNS 接管，应单独核对实际客户端设置。[Mihomo TUN 说明](https://wiki.metacubex.one/en/config/inbound/tun/)
 
@@ -322,13 +342,13 @@ sudo /bin/sh /var/run/local.clash-dns-guard.trial/rollback.sh --rollback
 
 AWS 订阅的固定 IP 无需直连 bootstrap。其他订阅若用域名连接节点，不能照搬“节点域名也经该节点解析”，否则会循环依赖。只在该订阅的 Merge 中把 `default-nameserver` 与 `proxy-server-nameserver` 设置为 IP 形式的加密 bootstrap（如 `https://223.5.5.5/dns-query#DIRECT`）；普通 `nameserver`、`direct-nameserver` 仍经该订阅已验证的节点，不能保留会抢先匹配的旧直连 DNS policy。此分支允许节点启动所需的直连加密查询，保护范围与 AWS 基线不同。
 
-历史记录中的个人使用信息已移除。
+不要只凭 HTTP 204 延迟测速选 DNS 出口：测速正常不能证明目标站点的 TLS 握手成功。用多个国内外域名完成证书校验和真实解析，再固定可用节点；切换订阅及重启后重新检查。不要把某个机场节点名或一次成功写成全部节点可用。
 
 ### 6.7 Apple Music 分流与证书问题
 
-历史记录中的个人使用信息已移除。
+先用相同资源对比直连和 AWS 的状态码、TLS 校验、首字节时间及下载耗时，再按精确域名加入直连规则。模板中的 `DOMAIN,p50-buy.itunes.apple.com,DIRECT` 是精确规则示例，不把所有 Apple、iTunes 或 mzstatic 域名加入白名单；实际部署需独立确认是否保留。
 
-历史记录中的个人使用信息已移除。
+遇到身份验证弹窗时，核对实际资源的证书及代理链；域名根路径返回 403 不等于证书无效，后续一次资源返回 200 也不能证明原弹窗的根因已经查清。不要用关闭校验、安装未知根证书或泛域名直连来掩盖问题。
 
 ## 7. 生成可自动更新的 HTTPS 订阅
 
@@ -373,9 +393,44 @@ systemctl is-active clash-subscription xray
 2. 订阅返回 200，正文 SHA-256 与 `/srv/clash-subscription/clash.yaml` 相同。
 3. HTTPS 根路径、`/clash.yaml`、错误 token 路径返回 404；HTTP 80 普通路径返回 404。
 4. 日志存在续期计划；“已安排续期”与“未来续期已发生”分开报告。
-5. 下载得到的 YAML 再经独立 Mihomo 导入并联网测试，Xray 仍正常。
+5. 下载得到的 YAML 先经独立 Mihomo 校验；完成 7.3 的 Hysteria 启动后，再按第 6 节测试两个入口的真实连接。
 
 Caddy 必须保留 `default_sni <静态IP>`，解决以 IP 连接、客户端不发送 SNI 的情况。关闭管理 API 后，本文通过 `SIGUSR1` 重载原配置；服务必须以 `caddy run --config ...` 启动，不能混用 API 加载另一份配置。[Caddy 命令与信号](https://caddyserver.com/docs/command-line)、[TLS 配置](https://caddyserver.com/docs/caddyfile/directives/tls)
+
+### 7.3 启动 IPv4 Hysteria2 备用服务
+
+先完成正式 CA 签发，再启动 Hysteria。模板复用 Caddy 的 IP 证书文件，两个服务使用同一 `clash-sub` 系统用户读取，不能把私钥改成所有用户可读。下面先检查配置引用的文件是否存在、该用户是否可读；Caddy 存储位置与模板不一致时先按实际位置修正配置。
+
+```bash
+install -d -o root -g clash-sub -m 750 /etc/hysteria
+install -o root -g clash-sub -m 640 bundle/hysteria.json /etc/hysteria/server.json
+python3 - <<'PY'
+import json
+import subprocess
+from pathlib import Path
+config = json.loads(Path('/etc/hysteria/server.json').read_text())
+for path in (config['tls']['cert'], config['tls']['key']):
+    subprocess.run(['runuser', '-u', 'clash-sub', '--', 'test', '-r', path], check=True)
+print('Certificate and key are readable by the service user.')
+PY
+install -m 644 bundle/hysteria.service /etc/systemd/system/hysteria.service
+systemd-analyze verify /etc/systemd/system/hysteria.service
+systemctl daemon-reload
+systemctl enable --now hysteria
+systemctl is-active hysteria xray clash-subscription
+systemctl is-enabled hysteria
+ss -lunp 'sport = :443'
+```
+
+认证密码与 Salamander 混淆密码分别生成并与客户端对应；混淆不能代替认证。客户端保留 `skip-cert-verify: false`，以服务器 IP 验证证书的 IP SAN，不能套用 REALITY 的伪装域名。证书由 Caddy 续期，Hysteria 每次 TLS 握手重读文件，无需把私钥复制到其他位置；续期后的真实握手仍应验证。[Hysteria TLS 与认证配置](https://v2.hysteria.network/docs/advanced/Full-Server-Config/)、[Mihomo Hysteria2 配置](https://wiki.metacubex.one/en/config/proxies/hysteria2/)
+
+Hysteria 模板另用 `acl.inline` 拒绝与 Xray 相同的私网、回环、链路本地及云元数据网段，避免已认证客户端经新入口访问服务器内部资源。该语法在 2.14.0 仍受支持；旧部署需单独核对，更新 GitHub 教程不会自动修改服务器访问限制。[Hysteria ACL](https://v2.hysteria.network/docs/advanced/ACL/)
+
+### 7.4 Shadowrocket 原生订阅的边界
+
+附录生成的是 Clash 完整配置，不能保证 Shadowrocket 能直接把同一 YAML 链接作为节点订阅导入。已有 Shadowrocket 原生端点的部署，应从同一份节点源配置生成 Base64 编码的 URI 列表：IPv6 为 VLESS/REALITY，IPv4 为 Hysteria2，后者保留认证、Salamander 参数及 `insecure=0`；IPv6 URI 主机必须带方括号，参数和节点名须正确 URL 编码。只处理 `vless` 的旧转换器会在迁移后遗漏 IPv4 或报错，需按协议类型分别生成。
+
+验证时应逐项比对两个原生节点与共享源参数、检查端点返回 200，再进行 iOS 实际导入和访问；端点 200 不代表设备验收通过。本附录不自动安装原生转换端点。原生节点列表也不携带 Clash 的分流规则或 `fallback` 策略，iOS 需单独配置策略并验证；不能承诺只刷新节点列表就同步完整配置。原生 URL、规则 URL、URI 和二维码均含私密信息，不放入公开仓库或在线转换服务。
 
 ## 8. AWS 月流量统计接入 Clash
 
@@ -440,9 +495,10 @@ profile-update-interval: 1
 1. Mac 原配置若是“本地文件”，改为同一 URL 的**远程订阅**；本地配置不会读取订阅响应头。优先通过客户端 UI 修改，保留 UID、扩展脚本、规则覆盖和其他订阅。
 2. 开启自动更新，间隔 60 分钟；证书验证保持开启。服务端 `profile-update-interval: 1` 的单位是小时，客户端已有设置可能优先，须在 UI 核对。
 3. 手动更新一次，卡片应出现“本月已用 / 2.00 TB”。描述可写“每月 1 日 08:00 重置”，不是订阅到期时间。
-4. Android 添加或更新同一 URL，选择 AWS 节点，规则模式断开重连；核对连接、Play 下载和流量卡片。
+4. Android 添加或更新同一 URL，`节点选择` 选择 `AWS 新加坡` 自动组，规则模式断开重连；核对连接、Play 下载和流量卡片。若曾在自动组手动固定单个节点，清除固定选择，恢复 IPv6 优先、IPv4 备用。
 5. 采集约每 15 分钟更新，客户端在订阅刷新时读取，**不是实时推送仪表盘**。某客户端不展示该响应头时，分别报告“服务端已返回”与“该客户端未显示”。
 6. 保留三份相互核对的证据：AWS 统计状态、HTTPS `Subscription-Userinfo`、客户端卡片；记录更新时间。规则/DNS 更新只替换订阅 YAML，继续复用第 8 节同一个采集服务和定时器，不重复安装统计功能。
+7. 同一 URL 的远程订阅会在各客户端成功刷新时取得新节点和策略，不是服务器主动推送。保留本地覆写时须检查最终生效配置；导入的本地文件、旧内核或手动固定节点不能据此认定已同步。
 
 ## 10. 验收记录
 
@@ -451,9 +507,11 @@ AI 按实际结果填写，未知项不能写通过：
 | 检查 | 通过条件 |
 |---|---|
 | 账号与费用 | 实例套餐、地区、赠金产品范围与到期日已核对 |
-| 网络入口 | IPv4 443/8443/80、IPv6 仅 TCP 443 与授权一致；22 未全网开放 |
+| 网络入口 | IPv4 TCP 443/8443/80、UDP 443；IPv6 仅 TCP 443 与授权一致；22 未全网开放 |
 | 双栈与网络切换 | Mac/手机各自固定 IPv4、IPv6 请求成功并核对实际链路；手机 Wi-Fi/移动数据分别记录 |
 | Xray | 配置测试通过、服务 active/enabled、443 监听 |
+| Hysteria2 | 服务 active/enabled、IPv4 UDP 443 监听；认证及可信 TLS 的真实连接成功 |
+| 自动备用 | 两节点正常时选 IPv6；在隔离客户端模拟 IPv6 入口不可用后选 IPv4，真实 HTTPS 成功 |
 | 客户端 TCP/UDP | 正确出口、Google 204、YouTube 可访问、UDP DNS 收到响应 |
 | 分流和 DNS | 国内业务 DIRECT、Claude 与 DoH 固定 AWS、Play 入口命中指定规则 |
 | DNS 失败保护 | 隔离内核中的 AWS 不可用且选择器为 DIRECT 时，真实 DNS 查询失败且无直连回退 |
@@ -466,15 +524,17 @@ AI 按实际结果填写，未知项不能写通过：
 | 权限 | 凭据 0600、专用 API 允许、无关 API 被拒绝 |
 | UI | Mac 远程订阅卡片出现用量；手机单独核对 |
 
-历史记录中的个人使用信息已移除。
+当前策略的验证方法：从原 HTTPS 订阅下载配置，与服务器源文件比较 SHA-256；确认自动组按 IPv6、IPv4 排序，60 秒检测、`lazy: false`。分别在双节点正常、隔离客户端模拟 IPv6 入口不可用两种情况下请求 HTTPS，核对实际连接链、HTTP 状态及证书校验。只允许修改隔离测试副本，不能停止生产 IPv6 服务来模拟故障。测试完成后停止临时内核，并确认正式客户端没有被固定到单节点。
+
+设备验收结果只保存在用户私密目录，逐项记录 Wi-Fi、移动网络、订阅刷新和重启是否实测；网站返回 503、仅测速成功或端点 200 均不能当成真实网页验收通过。公开教程不保留个人设备记录、真实抓包、截图、地址或订阅文件。仓库回归只使用虚构配置，不重新部署服务器或修改本机网络。
 
 ## 11. 维护、续跑与故障定位
 
 ### 更新规则
 
 1. 备份 `/srv/clash-subscription/clash.yaml`，准备 `.new` 文件，使用 Mihomo 校验。
-2. 保持原 UUID、公钥、short ID、订阅 token 和地址不变；只改本次规则/DNS。
-3. 同文件系统原子替换，属主 `root:clash-sub`、权限 `0640`；静态 YAML 不需要重启 Xray。
+2. 保持原 UUID、公钥、short ID、Hysteria 两个密码、订阅 token 和地址不变；只改本次授权的节点策略或规则/DNS。
+3. 同文件系统原子替换，属主 `root:clash-sub`、权限 `0640`；仅更新订阅不需要重启代理服务。迁移到 Hysteria 时先安装服务、放行已授权的 UDP 443 并完成独立握手验证，再发布新订阅；旧部署没有完整身份文件时，禁止直接运行首次生成器覆盖凭据。
 4. 下载原订阅 URL 核对 SHA-256，Mac 和手机分别更新订阅。**只改 Mac 本地文件，手机不会自动得到修改。**
 
 ### 续跑与回退
@@ -483,15 +543,27 @@ AI 按实际结果填写，未知项不能写通过：
 
 ### IPv4 超时、换 IP 与旧地址清理
 
-历史记录中的个人使用信息已移除。
+1. 先区分物理链路、协议握手、订阅下载与业务分流。检查当前实际加载的配置；固定物理网卡或关闭测试内核 TUN，避免测试经其他代理绕行。SSH 若只允许浏览器 SSH，本机 22 超时是预期，不把它当作故障证据。
+2. 通过浏览器 SSH 核对实例、Xray/Caddy 服务、443/8443 监听、IPv4/IPv6 防火墙及服务器出站；同时对照另一正常站点，并用 Wi-Fi/移动数据分别测端口。服务器健康不等于本地路径可达。
+3. 要查明丢包位置，应在释放旧 IP 前保留双方时间对应的抓包、不同网络和路径对照证据。旧 IP 多端口超时、同一实例换 IP 后恢复，只能支持“旧 IP 或其路径异常”，不能确定是运营商封禁、AWS 网络还是途中路由。未取得双端证据时，不能宣称已定位具体丢包设备。
+4. 已获换 IP 授权后，保留旧地址作短期回退，将新静态 IPv4 绑定原实例。修改私密 `params.json`、服务器订阅的 IPv4 节点及 `/32` 直连规则、Caddy 站点地址与 `default_sni`，签发新 IP 的正式证书；保留 UUID、密钥、short ID、订阅 token、其他 DNS/分流规则和 IPv6 地址。
+5. 同步更新专用 IAM 策略的 `aws:SourceIp` 为新地址 `/32`；不更换访问密钥、不扩大 API 权限。手动运行流量采集，核对最新月份、时间、服务退出码和实际响应头，不能用旧缓存用量宣称采集恢复。
+6. 两端原远程订阅的 URL 主机也须替换，路径/token 不变；手机按 6.2.1 处理旧 VPN 对更新的影响。分别验证新 IPv4/IPv6、HTTPS 订阅正文一致、流量采集及默认模式。
+7. 新地址验证成功且已有用户释放授权后，释放旧静态 IP，再查询地址列表确认只保留所需资源。释放后不能保证拿回原地址，也不能继续在原实例上对旧地址抓包。
+
+**先验证协议和路径，再决定是否换 IP。** 同时捕获客户端物理网卡与服务器的 TCP 握手，核对是否有 SYN、SYN-ACK 和重传；再用不同运营商和境外探测点访问同一目标，并从相同探测点访问正常的同区域基线。服务器收到请求并发出响应、客户端收不到，且基线正常，只能定位为目标 IP 的路径异常，不能据此确定丢弃设备或责任方。同一 IP 的 Hysteria2/UDP 若能通过认证、证书校验和真实 HTTPS，可用作备用路径；不能据此声称底层 TCP 路由已修复，或保证所有网络永久可用。
+
+若已使用 Hysteria 后再换 IP，还须同步其证书路径及客户端地址，确认新证书 IP SAN 匹配后重启 Hysteria，再测 UDP 握手；同时清理订阅中旧地址的直连例外，保留当前服务器 IPv4 `/32` 与 IPv6 `/128` 的例外。源配置和原生转换端点应一起核对。
 
 Lightsail 静态 IPv4 附加实例时不另收静态 IP 费用；未附加超过一小时按 **0.005 美元/小时**收费。这是保留闲置地址的费用，不是代理使用超过一小时收费。按执行当天 [Lightsail 官方 FAQ](https://aws.amazon.com/lightsail/faq/) 复核，避免混用 EC2 公网 IPv4 计费规则。
 
 ### 双栈自动切换的边界
 
-`AWS 新加坡` 是 `fallback` 组，按 IPv4、IPv6 顺序选首个健康节点，周期检测为 300 秒；不是按延迟选最快，也不保证故障瞬间无缝切换。两个入口仍是同一服务器，不能防止整台服务器故障。IPv6 入口可以访问仅 IPv4 的目标网站，入口协议与服务器出口是两回事。[Mihomo fallback 文档](https://wiki.metacubex.one/en/config/proxy-groups/fallback/)
+`AWS 新加坡` 是 `fallback` 组，按 IPv6、IPv4 顺序选首个健康节点，周期检测为 60 秒、`lazy: false`。IPv6 不可用时使用 IPv4 Hysteria2；恢复后由后续检查重新评估。它不按延迟选最快，也不保证现有连接无中断迁移。测试单节点后必须清除手动固定选择，不能只恢复外层 `节点选择`。两个入口仍是同一服务器，不能防止整台服务器故障。IPv6 入口可以访问仅 IPv4 的目标网站，入口协议与服务器出口是两回事。[Mihomo fallback 文档](https://wiki.metacubex.one/en/config/proxy-groups/fallback/)
 
 订阅下载仍使用 IPv4 的 HTTPS 地址；IPv6 代理可用不代表旧 IPv4 的订阅地址会自动变成新地址。保存私密的新订阅链接，换设备时重新核对主机。二维码包含订阅凭据，只在用户本机展示，不提交仓库或在线转换网站。
+
+当 IPv4 TCP 8443 的直连路径也不可用时，通过当前可用节点或其他已验证网络拉取订阅，保持正常证书校验；Hysteria2 可用本身不代表订阅下载已恢复。只调整节点协议或优先级、IP 和 token 均未变更时，继续刷新原 URL，不必重新导入。
 
 
 | 现象 | 先核对 | 修复方向 |
@@ -519,6 +591,7 @@ Lightsail 静态 IPv4 附加实例时不另收静态 IP 费用；未附加超过
 ```python
 #!/usr/bin/env python3
 import ipaddress
+import fcntl
 import json
 import os
 import re
@@ -542,6 +615,9 @@ def render(text, values):
 def main():
     os.umask(0o077)
     base = Path(__file__).resolve().parent
+    # 同一私密目录只允许一个生成器运行，避免身份与部署包交叉写入。
+    lock = (base / ".render.lock").open("a")
+    fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
     params = json.loads((base / "params.json").read_text())
     ip = ipaddress.ip_address(params["SERVER_IPV4"])
     if ip.version != 4 or not ip.is_global:
@@ -568,12 +644,18 @@ def main():
         identity = {"PRIVATE_KEY": keys["privatekey"], "PUBLIC_KEY": public,
                     "UUID": str(uuid.uuid4()), "SHORT_ID": secrets.token_hex(8),
                     "SUB_TOKEN": secrets.token_urlsafe(32)}
-        with identity_path.open("x") as stream:
-            json.dump(identity, stream, indent=2)
+    # 旧部署只补缺少的字段，重复生成不得更换任何现有凭据。
+    for key in ("HY2_PASSWORD", "HY2_OBFS_PASSWORD"):
+        if key not in identity:
+            identity[key] = secrets.token_urlsafe(32)
+    identity_tmp = identity_path.with_suffix(".tmp")
+    identity_tmp.write_text(json.dumps(identity, indent=2))
+    identity_tmp.chmod(0o600)
+    os.replace(identity_tmp, identity_path)
     identity_path.chmod(0o600)
     values = {**params, **identity}
     templates = extract((base / "README.md").read_text())
-    required = {"xray.json", "xray.service", "clash.yaml", "Caddyfile",
+    required = {"xray.json", "xray.service", "hysteria.json", "hysteria.service", "clash.yaml", "Caddyfile",
                 "clash-subscription.service", "traffic-header.caddy", "meter.py",
                 "lightsail-traffic.service", "lightsail-traffic.timer", "iam-policy.json",
                 "macos-dns-guard.sh", "local.clash-dns-guard.plist", "macos-dns-rollback.sh"}
@@ -711,6 +793,71 @@ ProtectHome=true
 WantedBy=multi-user.target
 ```
 
+### `hysteria.json`
+
+<!-- file: hysteria.json -->
+```json
+{
+  "listen": "0.0.0.0:443",
+  "tls": {
+    "cert": "/var/lib/clash-subscription/.local/share/caddy/certificates/acme-v02.api.letsencrypt.org-directory/@@SERVER_IPV4@@/@@SERVER_IPV4@@.crt",
+    "key": "/var/lib/clash-subscription/.local/share/caddy/certificates/acme-v02.api.letsencrypt.org-directory/@@SERVER_IPV4@@/@@SERVER_IPV4@@.key"
+  },
+  "auth": {
+    "type": "password",
+    "password": "@@HY2_PASSWORD@@"
+  },
+  "obfs": {
+    "type": "salamander",
+    "salamander": {
+      "password": "@@HY2_OBFS_PASSWORD@@"
+    }
+  },
+  "acl": {
+    "inline": [
+      "reject(0.0.0.0/8)",
+      "reject(10.0.0.0/8)",
+      "reject(100.64.0.0/10)",
+      "reject(127.0.0.0/8)",
+      "reject(169.254.0.0/16)",
+      "reject(172.16.0.0/12)",
+      "reject(192.168.0.0/16)",
+      "reject(224.0.0.0/4)",
+      "reject(240.0.0.0/4)",
+      "reject(::/128)",
+      "reject(::1/128)",
+      "reject(fc00::/7)",
+      "reject(fe80::/10)",
+      "reject(ff00::/8)",
+      "direct(all)"
+    ]
+  }
+}
+```
+
+### `hysteria.service`
+
+<!-- file: hysteria.service -->
+```ini
+[Unit]
+Description=Hysteria2 IPv4 proxy
+After=network-online.target clash-subscription.service
+Wants=network-online.target
+
+[Service]
+User=clash-sub
+Group=clash-sub
+ExecStart=/usr/local/bin/hysteria server -c /etc/hysteria/server.json
+Restart=on-failure
+RestartSec=3
+AmbientCapabilities=CAP_NET_BIND_SERVICE
+CapabilityBoundingSet=CAP_NET_BIND_SERVICE
+NoNewPrivileges=true
+
+[Install]
+WantedBy=multi-user.target
+```
+
 ### `clash.yaml`
 
 <!-- file: clash.yaml -->
@@ -745,21 +892,13 @@ dns:
   - https://8.8.8.8/dns-query#AWS 新加坡&ecs=0.0.0.0/0&ecs-override=true
 proxies:
 - name: AWS 新加坡 IPv4
-  type: vless
+  type: hysteria2
   server: "@@SERVER_IPV4@@"
   port: 443
-  uuid: "@@UUID@@"
-  flow: xtls-rprx-vision
-  tls: true
-  servername: "@@SNI@@"
-  client-fingerprint: chrome
-  network: tcp
-  udp: true
-  packet-encoding: xudp
-  reality-opts:
-    public-key: "@@PUBLIC_KEY@@"
-    short-id: "@@SHORT_ID@@"
-    support-x25519mlkem768: true
+  password: "@@HY2_PASSWORD@@"
+  obfs: salamander
+  obfs-password: "@@HY2_OBFS_PASSWORD@@"
+  skip-cert-verify: false
 - name: AWS 新加坡 IPv6
   type: vless
   server: "@@SERVER_IPV6@@"
@@ -780,10 +919,10 @@ proxy-groups:
 - name: AWS 新加坡
   type: fallback
   proxies:
-  - AWS 新加坡 IPv4
   - AWS 新加坡 IPv6
+  - AWS 新加坡 IPv4
   url: https://www.gstatic.com/generate_204
-  interval: 300
+  interval: 60
   lazy: false
 - name: 节点选择
   type: select
@@ -1156,4 +1295,10 @@ printf 'ROLLED_BACK\n' > "$trial/result"
 
 ## 仓库本地验证
 
-`python3 tests/validate.py` 会提取并渲染本 README 的模板，检查凭据复用、参数替换、统计跨月、异常保留、超额显示、DNS 固定出口、规则顺序及物理接口过滤。它只操作临时目录，不连接 AWS、不创建资源。设置 `CADDY_BIN` 可额外执行本地 HTTP 与信号重载测试；设置 `MIHOMO_BIN` 和 `MIHOMO_DATA_DIR` 可执行核心配置校验和“节点断开且选择器 DIRECT 时 DNS 不回退”的隔离回归。PF 测试仅生成规则文本并以替身命令验证超时回退与已提交保留，不加载系统防火墙；HTTP 测试需要允许监听回环端口。测试通过仍需按第 10 节验证新部署。
+`python3 tests/validate.py` 会提取并渲染本 README 的模板，检查凭据复用、旧身份补充 Hysteria 字段、双协议参数一致、IPv6 优先、参数替换、统计跨月、异常保留、超额显示、DNS 固定出口、规则顺序及物理接口过滤。它只操作临时目录，不连接 AWS、不创建资源。设置 `CADDY_BIN` 可额外执行本地 HTTP 与信号重载测试；设置 `MIHOMO_BIN` 和 `MIHOMO_DATA_DIR` 可执行核心配置校验和“节点断开且选择器 DIRECT 时 DNS 不回退”的隔离回归。PF 测试仅生成规则文本并以替身命令验证超时回退与已提交保留，不加载系统防火墙；HTTP 测试需要允许监听回环端口。测试通过仍需按第 10 节验证新部署。
+
+## 发布前的个人信息检查
+
+公开仓库只保留教程、占位符模板和虚构测试数据。不要提交真实 IP/域名、实例名、AWS 账号 ID、邮箱、设备标识、本机绝对路径、UUID、认证或混淆密码、订阅 token、私钥、访问密钥，以及包含这些内容的日志、抓包、二维码或截图。Base64 和二维码只是编码，不是脱敏。
+
+提交前检查 `git diff --cached`、未跟踪文件和待发布附件；`.gitignore` 不能移除已跟踪文件，也不能替代检查。Git 作者及提交者邮箱同样公开，应在 GitHub 邮箱设置中核对并使用隐私 `noreply` 地址。仓库历史也要检查：普通删除或后续脱敏提交不会移除旧版本中的内容。若有效凭据曾公开，应先更换对应凭据并验证各端，再单独确认历史重写的影响；强制推送不能收回既有克隆、缓存或其他人的副本。

@@ -3,9 +3,19 @@ __pycache__/
 .DS_Store
 params.json
 identity.json
+identity.tmp
+.render.lock
 bundle/
 state.json
 traffic-credentials.json
 subscription-url.txt
 *.pem
 *.key
+# 私密诊断与导出；真实材料仍应保存在仓库之外。
+outputs/
+diagnostics/
+*.pcap
+*.pcapng
+*.log
+*-Subscription-URL.txt
+*-Subscription-QR.png
