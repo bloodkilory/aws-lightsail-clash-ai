@@ -4,7 +4,7 @@
 
 本文件包含完整配置和脚本，单独下载 README 即可交给有浏览器、终端和文件操作能力的 AI 执行。账号登录、付款信息、验证码和授权由账号所有者完成；其余步骤连续执行。**“一键”指一次下达任务后由 AI 推进，不代表跳过云资源费用和权限确认。**
 
-更新日期：2026-11-17。当前模板为 IPv6 优先、IPv4 故障备用；使用占位符，不包含真实服务器地址、账号或凭据。价格、赠金活动、客户端版本应在执行当天复核。新账号、新服务器仍须完成本文验收，不能把模板检查当成实际连接成功的证据。
+更新日期：2026-11-19。当前模板包含 IPv6 优先、IPv4 故障备用、境内外 DNS 分流和订阅 TCP 8443 刷新规则。示例使用占位符。价格、赠金活动、客户端版本应在执行当天复核。新账号、新服务器仍须完成本文验收。
 
 ## 1. 复制这段话给 AI
 
@@ -15,7 +15,9 @@
 通过同一条 HTTPS 订阅使用，IPv6 VLESS/REALITY 优先、IPv4 Hysteria2 备用；
 自动组每 60 秒检查可用性；国内和局域网直连、国外走节点；
 Google Play 可下载；Clash 显示本月服务器 NetworkIn + NetworkOut / 套餐额度；
-Claude 官方请求与 DNS 固定经 AWS；Mac 阻止物理网卡直接发出 53/853 流量。
+普通境内域名使用直连的国内加密 DNS，Claude 官方请求和 DNS 固定经 AWS，
+两个指定的日志端点继续拦截；Mac 阻止物理网卡直接发出 53/853 流量。
+原订阅的 VPS IPv4 TCP 8443 在规则模式下经 AWS 自动组刷新。
 
 默认：Ubuntu 24.04 LTS x86_64、含公网 IPv4 的 1GB Lightsail 套餐，
 基准价 7 美元/月、2TB/月；先确认执行当天价格与账号赠金覆盖范围。
@@ -57,8 +59,8 @@ AI 先读取现有环境，再填写下表；只有账号归属、费用上限�
 
 1. 实例、静态 IPv4、套餐费用、赠金适用范围均有实际页面或 API 证据。
 2. Xray、Hysteria2、订阅服务和流量定时器启用；Google、YouTube、UDP 测试通过。
-3. 国内业务请求匹配 `DIRECT`；国外请求和 Google Play 入口匹配代理；Claude 官方请求及 DNS 固定 AWS。
-4. HTTPS 订阅通过正常证书校验，错误路径返回 404，下载内容与服务器源文件一致。
+3. 国内业务请求匹配 `DIRECT`，普通境内域名走国内加密 DNS。国外请求和 Google Play 入口匹配代理，Claude 官方请求及 DNS 固定 AWS，两个指定日志端点命中 `REJECT`。
+4. 在 TUN 规则模式经自动组下载原 HTTPS 订阅，证书校验通过，内容与服务器源文件一致，客户端刷新时间更新。错误路径返回 404。
 5. Mac 用远程订阅显示月流量；Mac 和手机分别固定 IPv4、IPv6 节点验证真实 HTTPS。手机 Wi-Fi、移动数据分别记录，未测不得写通过。
 6. Mac TUN 的 UDP/TCP DNS 均可用，物理网卡 53/853 出站被拦截；切订阅和重启后复验。
 
@@ -245,13 +247,14 @@ curl --max-time 20 -x http://127.0.0.1:7897 -o /dev/null -w '%{http_code}\n' htt
 
 更新后重新打开配置核对 URL 已保存、订阅时间与节点地址已刷新；失败的“保存”可能没有持久化。手机要单独验证，Mac 成功不代表手机成功。USB 仅用于调试，结束隔离窗口后再验证 VPN 和真实访问仍工作；未经授权不镜像其他 App。
 
-### 6.3 业务分流与 DNS 固定出口
+### 6.3 业务与 DNS 分流
 
 附录 `clash.yaml` 是唯一配置基线。业务规则按以下顺序执行：
 
 ```text
-服务器 IPv4/IPv6 → DIRECT（防止连接节点自身形成循环）
-Claude / Anthropic 官方域名及指定日志端点 → AWS 新加坡
+服务器 IPv4 的 TCP 8443 → AWS 新加坡（刷新 HTTPS 订阅）
+服务器 IPv4/IPv6 的其余匹配 → DIRECT（节点 TCP/UDP 443 连接避免循环）
+Claude / Anthropic 官方域名 → AWS 新加坡；两个指定日志端点 → REJECT
 已知 DoH / HTTPDNS、853 端口 → AWS 新加坡；未被 TUN 接管的 53 → REJECT
 局域网域名 / 私有 IP → DIRECT
 services.googleapis.cn → 节点选择
@@ -260,13 +263,13 @@ cn 域名 / CN IP → DIRECT
 其余 → 节点选择
 ```
 
-`geolocation-!cn` 仍在 `cn` 前，避免集合重叠导致海外业务直连。Claude 使用显式规则固定到 `AWS 新加坡`，不随通用选择器切到 `DIRECT`；本配置覆盖官方域名及模板列出的两个日志端点，不改变 Claude Code/CLI 的第三方 API 设置，也不代表登录或订阅权限已通过。
+业务规则与 DNS 策略均将 `geolocation-!cn` 放在 `cn` 前，显式域名例外优先。Claude 官方域名固定到 `AWS 新加坡`，通用选择器切换 `DIRECT` 时仍保持代理。两个指定 Datadog 主机的业务请求单独命中 `REJECT`，规则范围只覆盖这两个完整域名。验证时分别核对路由、证书和账号功能；命中代理只证明分流生效。
 
-DNS 采用同一组带 `#AWS 新加坡` 的 Cloudflare / Google DoH，统一用于 `nameserver`、`default-nameserver`、`proxy-server-nameserver`、`direct-nameserver`；Google 请求显式设置空 ECS。节点与 DoH 均使用 IP，启动不依赖直连 DNS。移除会使查询绕过 AWS 的旧国内直连 DNS policy；已有经过实测的精确加密解析例外逐项保留，不能不加区分地清空覆盖脚本。例如既有 CDN 的 ECS 策略应保留并单独验证。[Mihomo DNS 配置](https://wiki.metacubex.one/en/config/dns/)
+`nameserver-policy` 将普通 `geosite:cn` 域名交给 `https://223.5.5.5/dns-query#DIRECT`。`direct-nameserver-follow-policy: true` 使 `DIRECT` 连接重新解析域名时也使用这个分流。Claude、Google Play 入口、`geosite:geolocation-!cn` 及未命中例外的默认 DNS 继续使用经 AWS 访问的 Cloudflare / Google DoH。针对已有 CDN 的精确策略，检查最终生效配置并逐项复测。公开模板只保留通用规则。[Mihomo DNS 配置](https://wiki.metacubex.one/en/config/dns/)、[MetaCubeX 境内 DNS 示例](https://github.com/MetaCubeX/meta-rules-dat#示例)
 
-**国内业务仍直连，但解析依赖 AWS。** AWS 不可用时，未缓存的国内、国外域名都会解析失败，不回退系统或明文 DNS；缓存、已有连接不一定立即失效。不能把这一行为写成“代理停了国内上网也不受影响”。若内网名称只由路由器或企业 DNS 提供，本基线不会自动查询它，先确认所需内网名称再设置精确例外。
+业务流量匹配 `DIRECT` 时，实际地址仍取决于 DNS 选址；境内 CDN 返回的地址应从当前宽带验证。国内 DoH 连得通时，普通境内名称的解析可独立于 AWS。Claude 与海外 DNS 仍依赖 AWS，AWS 不可用时无法解析相关未缓存名称，模板不配置系统或明文 DNS 回退。内网名称依赖路由器或企业 DNS 时，按实际需要设置精确例外。
 
-通过真实连接日志核对 Google、GitHub、Claude、国内站点和局域网地址的出口；系统 DNS 显示一个公共地址不等于请求已从物理网卡泄漏，需结合 TUN 接管和抓包判断。Geo 数据每 24 小时更新，首次加载须成功。
+在规则模式和 TUN 下，抽查境内站点命中 `DIRECT` 及其真实 DNS 地址；用同一宽带比较首字节耗时和实际资源下载。有账号的站点分开验证页面、登录回跳和应用功能。核对 Google、GitHub、Claude 的代理连接，以及两条日志规则的拦截记录。系统显示的 DNS 地址需结合 TUN 接管和抓包判断。Geo 数据每 24 小时更新，首次加载须成功。
 
 ### 6.4 Google Play 无法下载
 
@@ -340,7 +343,7 @@ sudo /bin/sh /var/run/local.clash-dns-guard.trial/rollback.sh --rollback
 
 ### 6.6 与其他订阅共存
 
-AWS 订阅的固定 IP 无需直连 bootstrap。其他订阅若用域名连接节点，不能照搬“节点域名也经该节点解析”，否则会循环依赖。只在该订阅的 Merge 中把 `default-nameserver` 与 `proxy-server-nameserver` 设置为 IP 形式的加密 bootstrap（如 `https://223.5.5.5/dns-query#DIRECT`）；普通 `nameserver`、`direct-nameserver` 仍经该订阅已验证的节点，不能保留会抢先匹配的旧直连 DNS policy。此分支允许节点启动所需的直连加密查询，保护范围与 AWS 基线不同。
+AWS 订阅的固定 IP 无需通过 DNS 查找节点。其他订阅若用域名连接节点，先建立独立于该节点的 DNS 启动路径。只在该订阅的 Merge 中把 `default-nameserver` 与 `proxy-server-nameserver` 设置为 IP 形式的加密 DNS（如 `https://223.5.5.5/dns-query#DIRECT`）。按该订阅的分流要求配置 `nameserver`、`direct-nameserver` 和 `nameserver-policy`，清理会抢先匹配的冲突覆写，并验证生效配置。
 
 不要只凭 HTTP 204 延迟测速选 DNS 出口：测速正常不能证明目标站点的 TLS 握手成功。用多个国内外域名完成证书校验和真实解析，再固定可用节点；切换订阅及重启后重新检查。不要把某个机场节点名或一次成功写成全部节点可用。
 
@@ -513,12 +516,12 @@ AI 按实际结果填写，未知项不能写通过：
 | Hysteria2 | 服务 active/enabled、IPv4 UDP 443 监听；认证及可信 TLS 的真实连接成功 |
 | 自动备用 | 两节点正常时选 IPv6；在隔离客户端模拟 IPv6 入口不可用后选 IPv4，真实 HTTPS 成功 |
 | 客户端 TCP/UDP | 正确出口、Google 204、YouTube 可访问、UDP DNS 收到响应 |
-| 分流和 DNS | 国内业务 DIRECT、Claude 与 DoH 固定 AWS、Play 入口命中指定规则 |
-| DNS 失败保护 | 隔离内核中的 AWS 不可用且选择器为 DIRECT 时，真实 DNS 查询失败且无直连回退 |
+| 分流和 DNS | 国内业务 DIRECT、普通境内域名使用国内 DoH；Claude DNS 与业务走 AWS，两个指定日志主机 REJECT；Play 入口命中指定规则 |
+| DNS 失败保护 | 在隔离内核模拟 AWS 不可用且通用选择器为 DIRECT，Claude 等经 AWS 的 DNS 查询失败；国内 DoH 可达时，普通境内域名仍能解析 |
 | Mac PF | TUN TCP/UDP DNS 可用；物理接口 53/853 绕过请求被阻止，抓包无出站 |
 | 切换与重启 | 分别记录订阅切换、内核重启、整机重启结果，未执行不得写通过 |
 | 手机 Play | 规则模式实际完成一次应用下载 |
-| 订阅 | 可信 TLS、200、正文一致、错误路径 404 |
+| 订阅 | TUN 规则模式中原地址的 TCP 8443 命中 AWS 自动组；分别测试 IPv6 和 IPv4 节点，均验证 TLS、HTTP 200 和正文摘要；客户端刷新时间更新，错误路径返回 404 |
 | 续期 | 正式证书、有效期和自动续期计划可查 |
 | 流量 | 两个 AWS 指标 Sum、月份正确、响应头与状态文件一致 |
 | 权限 | 凭据 0600、专用 API 允许、无关 API 被拒绝 |
@@ -532,7 +535,7 @@ AI 按实际结果填写，未知项不能写通过：
 
 ### 更新规则
 
-1. 备份 `/srv/clash-subscription/clash.yaml`，准备 `.new` 文件，使用 Mihomo 校验。
+1. 备份 `/srv/clash-subscription/clash.yaml`，准备 `.new` 文件，使用 Mihomo 校验。先让本地测试客户端加载候选配置，保持 TUN 和规则模式验证 DNS、分流及原订阅下载，再发布到 VPS。
 2. 保持原 UUID、公钥、short ID、Hysteria 两个密码、订阅 token 和地址不变；只改本次授权的节点策略或规则/DNS。
 3. 同文件系统原子替换，属主 `root:clash-sub`、权限 `0640`；仅更新订阅不需要重启代理服务。迁移到 Hysteria 时先安装服务、放行已授权的 UDP 443 并完成独立握手验证，再发布新订阅；旧部署没有完整身份文件时，禁止直接运行首次生成器覆盖凭据。
 4. 下载原订阅 URL 核对 SHA-256，Mac 和手机分别更新订阅。**只改 Mac 本地文件，手机不会自动得到修改。**
@@ -546,7 +549,7 @@ AI 按实际结果填写，未知项不能写通过：
 1. 先区分物理链路、协议握手、订阅下载与业务分流。检查当前实际加载的配置；固定物理网卡或关闭测试内核 TUN，避免测试经其他代理绕行。SSH 若只允许浏览器 SSH，本机 22 超时是预期，不把它当作故障证据。
 2. 通过浏览器 SSH 核对实例、Xray/Caddy 服务、443/8443 监听、IPv4/IPv6 防火墙及服务器出站；同时对照另一正常站点，并用 Wi-Fi/移动数据分别测端口。服务器健康不等于本地路径可达。
 3. 要查明丢包位置，应在释放旧 IP 前保留双方时间对应的抓包、不同网络和路径对照证据。旧 IP 多端口超时、同一实例换 IP 后恢复，只能支持“旧 IP 或其路径异常”，不能确定是运营商封禁、AWS 网络还是途中路由。未取得双端证据时，不能宣称已定位具体丢包设备。
-4. 已获换 IP 授权后，保留旧地址作短期回退，将新静态 IPv4 绑定原实例。修改私密 `params.json`、服务器订阅的 IPv4 节点及 `/32` 直连规则、Caddy 站点地址与 `default_sni`，签发新 IP 的正式证书；保留 UUID、密钥、short ID、订阅 token、其他 DNS/分流规则和 IPv6 地址。
+4. 已获换 IP 授权后，保留旧地址作短期回退，将新静态 IPv4 绑定原实例。修改私密 `params.json`、服务器订阅的 IPv4 节点、TCP 8443 代理规则及 `/32` 直连规则、Caddy 站点地址与 `default_sni`，签发新 IP 的正式证书。保留 UUID、密钥、short ID、订阅 token、其他 DNS/分流规则和 IPv6 地址。
 5. 同步更新专用 IAM 策略的 `aws:SourceIp` 为新地址 `/32`；不更换访问密钥、不扩大 API 权限。手动运行流量采集，核对最新月份、时间、服务退出码和实际响应头，不能用旧缓存用量宣称采集恢复。
 6. 两端原远程订阅的 URL 主机也须替换，路径/token 不变；手机按 6.2.1 处理旧 VPN 对更新的影响。分别验证新 IPv4/IPv6、HTTPS 订阅正文一致、流量采集及默认模式。
 7. 新地址验证成功且已有用户释放授权后，释放旧静态 IP，再查询地址列表确认只保留所需资源。释放后不能保证拿回原地址，也不能继续在原实例上对旧地址抓包。
@@ -563,7 +566,11 @@ Lightsail 静态 IPv4 附加实例时不另收静态 IP 费用；未附加超过
 
 订阅下载仍使用 IPv4 的 HTTPS 地址；IPv6 代理可用不代表旧 IPv4 的订阅地址会自动变成新地址。保存私密的新订阅链接，换设备时重新核对主机。二维码包含订阅凭据，只在用户本机展示，不提交仓库或在线转换网站。
 
-当 IPv4 TCP 8443 的直连路径也不可用时，通过当前可用节点或其他已验证网络拉取订阅，保持正常证书校验；Hysteria2 可用本身不代表订阅下载已恢复。只调整节点协议或优先级、IP 和 token 均未变更时，继续刷新原 URL，不必重新导入。
+### 原订阅在规则模式无法刷新
+
+节点正常但原订阅 HTTPS 超时时，先用同一 URL 对照直连和经节点下载。若直连失败、经节点返回 200，检查 VPS IPv4 的 `/32,DIRECT` 是否先命中了订阅请求。附录的 `AND` 规则同时匹配目标 IPv4、TCP 和端口 8443，放在服务器地址直连规则前。节点仍通过 TCP/UDP 443 建立连接，订阅通过自动组选中的节点访问原地址。保持证书校验，并比较下载正文与源文件的 SHA-256。
+
+先在开启 TUN 的规则模式下用候选配置验证原链接，再分别用 IPv6 主节点和 IPv4 备用节点做真实下载。发布后通过客户端自己的刷新按钮复验，确认更新时间与配置正文。仍持有旧规则的客户端要先通过能访问原地址的网络，或临时用可用节点的全局模式完成一次更新，再回到规则模式。首次导入也需要一条可访问原地址的路径。只改分流和 DNS 时继续使用原 URL。
 
 
 | 现象 | 先核对 | 修复方向 |
@@ -873,23 +880,31 @@ profile:
 dns:
   enable: true
   ipv6: true
-  default-nameserver:
+  default-nameserver: &aws-doh
   - https://1.1.1.1/dns-query#AWS 新加坡
   - https://8.8.8.8/dns-query#AWS 新加坡&ecs=0.0.0.0/0&ecs-override=true
   enhanced-mode: fake-ip
   fake-ip-range: 198.18.0.1/16
   use-hosts: true
-  nameserver:
-  - https://1.1.1.1/dns-query#AWS 新加坡
-  - https://8.8.8.8/dns-query#AWS 新加坡&ecs=0.0.0.0/0&ecs-override=true
+  nameserver: *aws-doh
   fake-ip-range6: 2001:2::0/64
   use-system-hosts: false
-  proxy-server-nameserver:
-  - https://1.1.1.1/dns-query#AWS 新加坡
-  - https://8.8.8.8/dns-query#AWS 新加坡&ecs=0.0.0.0/0&ecs-override=true
-  direct-nameserver:
-  - https://1.1.1.1/dns-query#AWS 新加坡
-  - https://8.8.8.8/dns-query#AWS 新加坡&ecs=0.0.0.0/0&ecs-override=true
+  proxy-server-nameserver: *aws-doh
+  direct-nameserver: *aws-doh
+  direct-nameserver-follow-policy: true
+  nameserver-policy:
+    '+.anthropic.com': *aws-doh
+    '+.claude.ai': *aws-doh
+    '+.claude.com': *aws-doh
+    '+.claude.app': *aws-doh
+    '+.claudeusercontent.com': *aws-doh
+    '+.claudemcpcontent.com': *aws-doh
+    'http-intake.logs.us5.datadoghq.com': *aws-doh
+    'browser-intake-us5-datadoghq.com': *aws-doh
+    'services.googleapis.cn': *aws-doh
+    'geosite:geolocation-!cn': *aws-doh
+    'geosite:cn':
+    - https://223.5.5.5/dns-query#DIRECT
 proxies:
 - name: AWS 新加坡 IPv4
   type: hysteria2
@@ -930,17 +945,17 @@ proxy-groups:
   - AWS 新加坡
   - DIRECT
 rules:
+- AND,((DST-PORT,8443),(NETWORK,TCP),(IP-CIDR,@@SERVER_IPV4@@/32,no-resolve)),AWS 新加坡
 - IP-CIDR,@@SERVER_IPV4@@/32,DIRECT,no-resolve
 - IP-CIDR6,@@SERVER_IPV6@@/128,DIRECT,no-resolve
-- DOMAIN,p50-buy.itunes.apple.com,DIRECT
 - DOMAIN-SUFFIX,anthropic.com,AWS 新加坡
 - DOMAIN-SUFFIX,claude.ai,AWS 新加坡
 - DOMAIN-SUFFIX,claude.com,AWS 新加坡
 - DOMAIN-SUFFIX,claude.app,AWS 新加坡
 - DOMAIN-SUFFIX,claudeusercontent.com,AWS 新加坡
 - DOMAIN-SUFFIX,claudemcpcontent.com,AWS 新加坡
-- DOMAIN,http-intake.logs.us5.datadoghq.com,AWS 新加坡
-- DOMAIN,browser-intake-us5-datadoghq.com,AWS 新加坡
+- DOMAIN,http-intake.logs.us5.datadoghq.com,REJECT
+- DOMAIN,browser-intake-us5-datadoghq.com,REJECT
 - GEOSITE,category-doh,AWS 新加坡
 - GEOSITE,category-httpdns-cn,AWS 新加坡
 - DST-PORT,53,REJECT
@@ -955,6 +970,7 @@ rules:
 - GEOSITE,private,DIRECT
 - GEOIP,private,DIRECT,no-resolve
 - DOMAIN,services.googleapis.cn,节点选择
+- DOMAIN,p50-buy.itunes.apple.com,DIRECT
 - GEOSITE,geolocation-!cn,节点选择
 - GEOSITE,cn,DIRECT
 - GEOIP,CN,DIRECT
@@ -1295,7 +1311,7 @@ printf 'ROLLED_BACK\n' > "$trial/result"
 
 ## 仓库本地验证
 
-`python3 tests/validate.py` 会提取并渲染本 README 的模板，检查凭据复用、旧身份补充 Hysteria 字段、双协议参数一致、IPv6 优先、参数替换、统计跨月、异常保留、超额显示、DNS 固定出口、规则顺序及物理接口过滤。它只操作临时目录，不连接 AWS、不创建资源。设置 `CADDY_BIN` 可额外执行本地 HTTP 与信号重载测试；设置 `MIHOMO_BIN` 和 `MIHOMO_DATA_DIR` 可执行核心配置校验和“节点断开且选择器 DIRECT 时 DNS 不回退”的隔离回归。PF 测试仅生成规则文本并以替身命令验证超时回退与已提交保留，不加载系统防火墙；HTTP 测试需要允许监听回环端口。测试通过仍需按第 10 节验证新部署。
+`python3 tests/validate.py` 会提取并渲染本 README 的模板，检查凭据复用、双协议参数、IPv6 优先、流量统计、境内外 DNS、Claude 代理与日志拦截、订阅 8443 规则顺序及物理接口过滤。测试在临时目录运行。设置 `CADDY_BIN` 可额外执行本地 HTTP 与信号重载测试。设置 `MIHOMO_BIN` 和 `MIHOMO_DATA_DIR` 可运行核心配置校验，并在本地隔离回归中验证 AWS 不可用时 Claude DNS 无直连回退。PF 测试使用替身命令。新部署仍需按第 10 节做真实验收。
 
 ## 发布前的个人信息检查
 

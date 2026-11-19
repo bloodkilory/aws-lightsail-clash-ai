@@ -13,22 +13,36 @@ import unittest
 import urllib.parse
 from pathlib import Path
 
+CLAUDE_DOMAINS = ('anthropic.com', 'claude.ai', 'claude.com', 'claude.app',
+                  'claudeusercontent.com', 'claudemcpcontent.com')
+LOG_HOSTS = ('http-intake.logs.us5.datadoghq.com', 'browser-intake-us5-datadoghq.com')
+
 
 class DnsTests(unittest.TestCase):
-    def test_dns_stays_on_aws_when_selector_changes(self):
+    def test_dns_splits_domestic_queries_and_keeps_aws_exceptions(self):
         dns = RENDERED['clash.yaml'].split('\ndns:\n')[1].split('\nproxies:')[0]
-        for field in ('nameserver', 'default-nameserver', 'proxy-server-nameserver', 'direct-nameserver'):
-            self.assertRegex(dns, r'  ' + field + r':\n  - https://1\.1\.1\.1/dns-query#AWS 新加坡\n  - https://8\.8\.8\.8/dns-query#AWS 新加坡&ecs=0\.0\.0\.0/0&ecs-override=true')
-        self.assertNotIn('#DIRECT', dns)
+        self.assertIn('default-nameserver: &aws-doh\n  - https://1.1.1.1/dns-query#AWS 新加坡'
+                      '\n  - https://8.8.8.8/dns-query#AWS 新加坡&ecs=0.0.0.0/0&ecs-override=true', dns)
+        for field in ('nameserver', 'proxy-server-nameserver', 'direct-nameserver'):
+            self.assertIn(f'\n  {field}: *aws-doh\n', dns)
+        self.assertIn('direct-nameserver-follow-policy: true', dns)
+        domestic = "    'geosite:cn':\n    - https://223.5.5.5/dns-query#DIRECT"
+        self.assertIn(domestic, dns)
+        for key in (*(f'+.{domain}' for domain in CLAUDE_DOMAINS), *LOG_HOSTS,
+                    'services.googleapis.cn', 'geosite:geolocation-!cn'):
+            self.assertLess(dns.index(f"    '{key}': *aws-doh"), dns.index(domestic))
+        self.assertEqual(dns.count('#DIRECT'), 1)
         self.assertNotIn('#节点选择', dns)
         self.assertNotIn('fallback:', dns)
 
     def test_official_and_dns_routes_precede_domestic_rules(self):
         body = RENDERED['clash.yaml']
         limit = body.index('- GEOSITE,cn,DIRECT')
-        for domain in ('anthropic.com', 'claude.ai', 'claude.com', 'claude.app',
-                       'claudeusercontent.com', 'claudemcpcontent.com'):
+        for domain in CLAUDE_DOMAINS:
             self.assertLess(body.index('- DOMAIN-SUFFIX,' + domain + ',AWS 新加坡'), limit)
+        for host in LOG_HOSTS:
+            self.assertLess(body.index(f'- DOMAIN,{host},REJECT'), limit)
+            self.assertNotIn(f'- DOMAIN,{host},AWS 新加坡', body)
         for rule in ('GEOSITE,category-doh,AWS 新加坡', 'GEOSITE,category-httpdns-cn,AWS 新加坡',
                      'DST-PORT,53,REJECT', 'DST-PORT,853,AWS 新加坡'):
             self.assertLess(body.index('- ' + rule), limit)
@@ -116,7 +130,7 @@ class DnsTests(unittest.TestCase):
                 self.assertEqual((trial / 'result').read_text(), 'ROLLED_BACK\n')
 
     @unittest.skipUnless(os.environ.get('MIHOMO_BIN'), 'MIHOMO_BIN not set')
-    def test_unavailable_aws_does_not_fall_back_to_direct_dns(self):
+    def test_unavailable_aws_does_not_fall_back_to_direct_dns_for_claude(self):
         with tempfile.TemporaryDirectory() as folder:
             root = Path(folder)
             control = str(root / 'control.sock')
@@ -125,6 +139,7 @@ class DnsTests(unittest.TestCase):
             # No live listener or TUN; the proxy can only connect to a closed loopback port.
             body += '\nexternal-controller-unix: ' + json.dumps(control) + '\n'
             body = body.replace('store-selected: true', 'store-selected: false')
+            body = body.replace('geo-auto-update: true', 'geo-auto-update: false')
             (root / 'config.yaml').write_text(body)
             for name in ('geosite.dat', 'geoip.dat', 'Country.mmdb'):
                 source = Path(os.environ['MIHOMO_DATA_DIR']) / name
@@ -168,7 +183,7 @@ class DnsTests(unittest.TestCase):
                         self.fail('Isolated core readiness timeout')
                     path = '/proxies/' + urllib.parse.quote('节点选择', safe='')
                     self.assertEqual(api('PUT', path, {'name': 'DIRECT'})[0], 204)
-                    status, result = api('GET', '/dns/query?name=www.baidu.com&type=A')
+                    status, result = api('GET', '/dns/query?name=claude.ai&type=A')
                     self.assertFalse([x for x in result.get('Answer', []) if x.get('type') in (1, 28)])
                     self.assertTrue(status >= 400 or result.get('Status') == 2, result)
                 finally:

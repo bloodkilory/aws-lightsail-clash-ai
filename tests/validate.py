@@ -110,7 +110,11 @@ class GuideTests(unittest.TestCase):
         body = RENDERED['clash.yaml']
         self.assertLess(body.index('- DOMAIN,services.googleapis.cn'), body.index('- GEOSITE,cn,DIRECT'))
         self.assertLess(body.index('- GEOSITE,geolocation-!cn'), body.index('- GEOSITE,cn,DIRECT'))
-        self.assertIn('IP-CIDR,8.8.8.8/32,DIRECT,no-resolve', body)
+        subscription = f"- AND,((DST-PORT,8443),(NETWORK,TCP),(IP-CIDR,{PARAMS['SERVER_IPV4']}/32,no-resolve)),AWS 新加坡"
+        node_ipv4 = f"- IP-CIDR,{PARAMS['SERVER_IPV4']}/32,DIRECT,no-resolve"
+        node_ipv6 = f"- IP-CIDR6,{PARAMS['SERVER_IPV6']}/128,DIRECT,no-resolve"
+        self.assertLess(body.index(subscription), body.index(node_ipv4))
+        self.assertLess(body.index(subscription), body.index(node_ipv6))
 
     @unittest.skipUnless(os.environ.get('MIHOMO_BIN'), 'MIHOMO_BIN not set')
     def test_actual_mihomo_config(self):
